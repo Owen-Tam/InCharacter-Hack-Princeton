@@ -1,7 +1,14 @@
-# Fiction Companion backend
+# Fiction Companion
 
-Python 3.11+. One SQLite database (`data/companion.db`) holds every book; the
-import worker writes it and the API reads it.
+Open a novel, place a bookmark, and interview a character as they are at that
+moment in the story. Replies sound like the character and draw only on what
+they could know by that page. See the two PDFs in this folder for the brief and
+the backend design.
+
+## Backend
+
+Python 3.11+, in `backend/`. One SQLite database (`backend/data/companion.db`)
+holds every book; the import worker writes it and the API reads it.
 
 ```bash
 cd backend
@@ -17,7 +24,7 @@ caffeinate -dims .venv/bin/python -m companion.worker ../test_epub/great_gatsby.
 Keep the Mac awake and the lid open during imports (`caffeinate`): sleep kills
 the model connections. An import resumes where it stopped if rerun.
 
-## Reading positions
+### Reading positions
 
 A **position** is a sentence number, counted from 1 across the whole book. The
 reader's bookmark is the last sentence they have finished. Paragraph text
@@ -28,7 +35,7 @@ i.e. JavaScript `Array.from(text)` indexes, not UTF-16 `text.length`).
 Render the book from `/passages` rather than from the raw EPUB so citation
 offsets line up with what is on screen.
 
-## Endpoints
+### Endpoints
 
 | Method | Path | Notes |
 |---|---|---|
@@ -40,7 +47,7 @@ offsets line up with what is on screen.
 | POST | `/chat` | see below |
 | GET | `/books/{id}/passages/{passage_id}?position=N` | one paragraph cut at the bookmark ("show passage") |
 
-### POST /chat
+#### POST /chat
 
 ```json
 {"book_id": 2, "character_id": 22, "position": 400,
@@ -76,9 +83,9 @@ Errors: `400` bad request or character not met yet, `404` unknown book/character
 `409` bookmark past `indexed_through` (still importing), `502` model service
 failed (retry). Replies take roughly 5–30 seconds.
 
-## Layout
+### Layout
 
-`companion/`: `epub.py` + `sentences.py` (EPUB to passages), `chunker.py`,
+`backend/companion/`: `epub.py` + `sentences.py` (EPUB to passages), `chunker.py`,
 `extract.py` + `prompts/` (model passes), `resolve.py` (proves model output
 against the text), `commit.py` (checkpointed writes), `voice.py`, `worker.py`
 (import pipeline), `chat.py` (retrieval and replies), `api.py` (HTTP).
