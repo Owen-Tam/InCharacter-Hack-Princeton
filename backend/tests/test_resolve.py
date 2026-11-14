@@ -209,6 +209,23 @@ def test_repeated_first_mention_uses_the_earliest_occurrence(conn, book):
     assert resolve(conn, book, candidates, 0, 4).characters[0].first_seen == 3
 
 
+@pytest.mark.parametrize("name", ["I", "me", " You ", "HER"])
+def test_pronoun_is_never_a_character_name(conn, book, name):
+    candidates = theo_says()
+    candidates["characters"][0]["name"] = name
+    chunk = resolve(conn, book, candidates, 0, 4)
+    assert chunk.characters == []
+    assert "cannot be named" in chunk.rejects[0].reason
+
+
+def test_narrator_character_is_allowed(conn, book):
+    candidates = theo_says()
+    candidates["characters"][0].update(key="narrator", name="the narrator")
+    candidates["utterances"][0]["speaker"] = "narrator"
+    chunk = resolve(conn, book, candidates, 0, 4)
+    assert chunk.rejects == [] and chunk.characters[0].display_name == "the narrator"
+
+
 def test_existing_character_is_referenced_by_id(conn, book):
     theo = committed_theo(conn, book)
     candidates = {"utterances": [theo_says(speaker=theo)["utterances"][0]]}

@@ -11,7 +11,9 @@ EXTRACT_MODEL = "deepseek-v4-flash"
 
 # Bump PROMPT_VERSION whenever a prompt in companion/prompts/ changes meaningfully.
 # A new version creates a new books row instead of mixing outputs, as the guide asks.
-PROMPT_VERSION = "extract-v2"  # v2: shared claims, last-known presence in the registry
+# v2: shared claims, last-known presence in the registry
+# v3: first-person narrators (no "I" characters or claims), no hindsight leaks
+PROMPT_VERSION = "extract-v3"
 VERSION = f"{PROMPT_VERSION}/{EXTRACT_MODEL}"
 
 # Credits per million tokens (input, output) from Adaption's model list.

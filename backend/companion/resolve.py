@@ -180,6 +180,10 @@ def _name_key(name: str) -> str:
     return " ".join(fold(name).casefold().split())
 
 
+_PRONOUNS = frozenset(
+    "i me my myself we us our you your he him his she her they them their it one".split())
+
+
 def _loose_key(name: str) -> str:
     """Name with case, punctuation and underscores ignored: 'mr_summers' ~ 'Mr. Summers'."""
     return " ".join(re.sub(r"[^\w\s]|_", " ", fold(name).casefold()).split())
@@ -312,6 +316,8 @@ class _Resolver:
         if key in self.keys:
             raise Rejected(f"duplicate character key {key!r}")
         name = _text(item, "name")
+        if _loose_key(name) in _PRONOUNS:
+            raise Rejected(f"a character cannot be named {name!r}; use 'the narrator' or a name")
         existing = self.names.get(_name_key(name))
         if existing is not None:  # already known: point the key at it, add no row
             self.keys[key] = existing

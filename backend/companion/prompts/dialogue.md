@@ -21,6 +21,9 @@ People who first appear in this section and are not already in KNOWN CHARACTERS:
 - `name`: the most specific name the text has given so far, e.g. `"Mr. Summers"`.
 - `first_mention`: a span containing their first mention in the text you were given.
 - Do not create characters for groups ("the crowd", "several people") or for anonymous one-off speakers ("a woman", "a voice", "someone").
+- Never name a character "I", "me", "you" or another pronoun.
+- First-person narrator: if the story is told by "I", the narrator is a character. Create them once, with key `"narrator"` and name `"the narrator"` unless their real name already appears in the text you can see. Their lines ("I said") have the narrator as speaker. When the text later reveals the narrator's name (for example another character calls them "Nick"), add it as an alias of the narrator; do not create a second character.
+- Describe someone by relationship ("the narrator's father") only if they are never named in the text you can see.
 - Do not create a new character for someone already in KNOWN CHARACTERS under another name; add an alias instead.
 - Skip text that is not part of the story itself (title pages, licences, tables of contents, prefaces, notes, study or discussion questions). For such text return empty lists.
 

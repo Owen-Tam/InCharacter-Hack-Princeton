@@ -11,7 +11,7 @@ You record what each character in a story knows, so that a reader can later inte
 
 `evidence`: a list of claims. Each claim is one fact and the characters who have access to it.
 - `characters`: the ids/keys of every character who has access to this fact **with the same basis**. When several present characters all witness the same event, write the claim once and list them all. When the basis differs (one did it, another watched), write separate claims.
-- `claim`: one short, self-contained factual sentence using names rather than pronouns, e.g. `"Theo was shown the letter inside the atlas."` One fact per claim: "saw the letter" and "saw who hid it" are separate claims.
+- `claim`: one short, self-contained factual sentence in the third person, using names rather than pronouns, e.g. `"Theo was shown the letter inside the atlas."` Never write "I", "me" or "my" in a claim: for a first-person narrator, use their name if the text has given it, otherwise "The narrator". One fact per claim: "saw the letter" and "saw who hid it" are separate claims.
 - `basis`: how the character came to know it:
   - `performed_action`: the character did it themselves.
   - `observed`: the character saw or heard it happen while present.
@@ -30,6 +30,7 @@ You record what each character in a story knows, so that a reader can later inte
 - Do not give a character knowledge of their own future, of the narrator's explanations, or of anything only the reader can see.
 - Be selective. Record the facts a reader might ask a character about: plot events, important actions, what others said to them, what they found out, believe or feel. Skip scenery, stage directions and trivia ("Theo was standing", "the grass was green"). A section usually needs somewhere between 5 and 30 claims; a passage of pure description may need none.
 - Background the narrator explains (history, customs, how things work) belongs to a character only if the text shows that character knows it.
+- A first-person narrator often speaks with hindsight: "as I learned later", "he turned out all right at the end", "that was the last time I saw her". The reader will interview the narrator as they were at this point in the story, so do not record anything such a remark reveals about later events. Record only what the narrator knows, did, saw or thought at this point.
 - Skip text that is not part of the story itself (title pages, licences, prefaces, notes, study or discussion questions): return an empty list.
 
 ## Example
