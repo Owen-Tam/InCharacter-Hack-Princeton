@@ -25,6 +25,25 @@ class CommitResult:
     evidence_ids: list[int] = field(default_factory=list)
 
 
+def add_alias(conn: sqlite3.Connection, book_id: int, character_id: int, alias: dict) -> bool:
+    """Add ``alias`` to a character's names, kept in reveal order. Call inside a
+    write transaction. Returns False if the character already has that name."""
+    _check_sources(conn, book_id, alias["sources"])
+    current = conn.execute(
+        "SELECT aliases FROM characters WHERE id=? AND book_id=?", (character_id, book_id),
+    ).fetchone()
+    if current is None:
+        raise ValueError(f"character {character_id!r} is not in book {book_id}")
+    aliases = json.loads(current["aliases"])
+    if any(a["name"] == alias["name"] for a in aliases):
+        return False
+    aliases.append(alias)
+    aliases.sort(key=lambda a: a["available_from"])
+    conn.execute("UPDATE characters SET aliases=? WHERE id=?",
+                 (json.dumps(aliases, ensure_ascii=False), character_id))
+    return True
+
+
 def _check_sources(conn: sqlite3.Connection, book_id: int, sources: list) -> None:
     """Source references live inside JSON, so the database cannot check them for us."""
     for src in sources:
@@ -78,22 +97,7 @@ def commit_chunk(
             return result.character_ids[ref] if isinstance(ref, str) else ref
 
         for row_ in chunk.aliases:
-            _check_sources(conn, book_id, row_.alias["sources"])
-            current = conn.execute(
-                "SELECT aliases FROM characters WHERE id=? AND book_id=?",
-                (cid(row_.character), book_id),
-            ).fetchone()
-            if current is None:
-                raise ValueError(f"character {row_.character!r} is not in book {book_id}")
-            aliases = json.loads(current["aliases"])
-            if any(a["name"] == row_.alias["name"] for a in aliases):
-                continue
-            aliases.append(row_.alias)
-            aliases.sort(key=lambda a: a["available_from"])
-            conn.execute(
-                "UPDATE characters SET aliases=? WHERE id=?",
-                (json.dumps(aliases, ensure_ascii=False), cid(row_.character)),
-            )
+            add_alias(conn, book_id, cid(row_.character), row_.alias)
 
         for u in chunk.utterances:
             _check_sources(conn, book_id, u.sources)

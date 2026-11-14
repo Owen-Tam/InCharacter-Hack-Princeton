@@ -62,6 +62,14 @@ def test_characters_depend_on_the_bookmark(setup):
     assert theo["lines"] == 1 and theo["facts"] == 2 and theo["has_voice_profile"] is False
 
 
+def test_characters_say_when_they_were_last_heard(setup):
+    client = setup["client"]
+    at_2 = client.get(f"/books/{setup['book']}/characters", params={"position": 2}).json()
+    assert at_2[0]["last_heard"] is None  # Theo's "Empty again." is in sentence 3
+    at_4 = client.get(f"/books/{setup['book']}/characters", params={"position": 4}).json()
+    assert [(c["name"], c["last_heard"]) for c in at_4] == [("Theo", 3), ("Mara", None)]
+
+
 def test_chat_returns_a_cited_imagined_reply(setup):
     response = setup["client"].post("/chat", json={
         "book_id": setup["book"], "character_id": setup["theo"], "position": 4,

@@ -331,10 +331,12 @@ def extract_book(
     2. Resumes from the checkpoint after API failures (``resumes`` times).
     3. Gets past passages that make the model run out of output tokens by using
        smaller chunks briefly, then returns to ``target_chars``.
-    4. Recovers previously rejected records from the extraction log (no model
+    4. Fills in full names the text spells out ("Jay Gatsby"), without model calls.
+    5. Recovers previously rejected records from the extraction log (no model
        calls), so resolver improvements reach books imported earlier.
     Snapshots a crash skipped are caught up by ``run_import`` itself.
     """
+    from .names import complete_names
     from .repair import recover_rejects
 
     with (keep_awake() if stay_awake else nullcontext(False)) as awake:
@@ -348,6 +350,11 @@ def extract_book(
                 story_start=story_start, story_end=story_end),
             resumes=resumes, wait=resume_wait, target_chars=target_chars,
             say=say, sleep=sleep)
+
+    added_names = complete_names(conn, summary.book_id)
+    if added_names:
+        say("Filled in full names from the text: "
+            + ", ".join(f"{a.name} (from sentence {a.available_from})" for a in added_names))
 
     if log_path is not None and Path(log_path).exists():
         repaired = recover_rejects(conn, summary.book_id, Path(log_path))

@@ -17,9 +17,14 @@ from typing import Iterator, Sequence
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 
-def connect(path: str | Path = ":memory:") -> sqlite3.Connection:
-    """Open a connection with foreign keys on and explicit transaction control."""
-    conn = sqlite3.connect(str(path), isolation_level=None, timeout=30)
+def connect(path: str | Path = ":memory:", *, check_same_thread: bool = True) -> sqlite3.Connection:
+    """Open a connection with foreign keys on and explicit transaction control.
+
+    The API passes ``check_same_thread=False``: FastAPI may open a request's
+    connection in one worker thread and run the endpoint in another. Each
+    request still has its own connection, used by one thread at a time."""
+    conn = sqlite3.connect(str(path), isolation_level=None, timeout=30,
+                           check_same_thread=check_same_thread)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     # WAL lets FastAPI read while the import worker writes. No-op for :memory:.

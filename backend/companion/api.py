@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from . import config, db
-from .chat import ChatError, book_row, character_row, chat, check_position, clamp, known_names, load_passage
+from .chat import ChatError, best_name, book_row, character_row, chat, check_position, clamp, known_names, load_passage
 from .epub import import_epub
 from .llm import LLM, LLMError
 
@@ -136,7 +136,7 @@ def create_app(
         return llm_holder["llm"]
 
     def get_conn() -> Iterator[sqlite3.Connection]:
-        conn = db.connect(db_path)
+        conn = db.connect(db_path, check_same_thread=False)
         try:
             yield conn
         finally:
@@ -223,15 +223,16 @@ def create_app(
         out = []
         for r in conn.execute("SELECT * FROM characters WHERE book_id=? AND first_seen<=?"
                               " ORDER BY first_seen, id", (book_id, position)):
-            lines = conn.execute("SELECT count(*) FROM utterances WHERE book_id=? AND speaker_id=?"
-                                 " AND available_from<=?", (book_id, r["id"], position)).fetchone()[0]
+            lines, last_heard = conn.execute(
+                "SELECT count(*), max(available_from) FROM utterances WHERE book_id=? AND speaker_id=?"
+                " AND available_from<=?", (book_id, r["id"], position)).fetchone()
             facts = conn.execute("SELECT count(*) FROM evidence WHERE book_id=? AND character_id=?"
                                  " AND available_from<=?", (book_id, r["id"], position)).fetchone()[0]
             snapshots = [s for s in json.loads(r["voice_snapshots"])
                          if s["through_position"] <= position]
-            out.append({"id": r["id"], "name": r["display_name"],
+            out.append({"id": r["id"], "name": best_name(r, position),
                         "names": known_names(r, position), "first_seen": r["first_seen"],
-                        "lines": lines, "facts": facts, "has_voice_profile": bool(snapshots)})
+                        "lines": lines, "last_heard": last_heard, "facts": facts, "has_voice_profile": bool(snapshots)})
         return out
 
     @app.get("/books/{book_id}/passages/{passage_id}")
@@ -251,7 +252,7 @@ def create_app(
         character = character_row(conn, request.book_id, request.character_id, request.position)
         return {
             "kind": result.kind,
-            "character": {"id": character["id"], "name": character["display_name"]},
+            "character": {"id": character["id"], "name": best_name(character, request.position)},
             "position": request.position,
             "reply": result.reply,
             "citations": result.citations,

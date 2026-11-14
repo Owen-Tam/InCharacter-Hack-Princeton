@@ -5,6 +5,28 @@ moment in the story. Replies sound like the character and draw only on what
 they could know by that page. See the two PDFs in this folder for the brief and
 the backend design.
 
+## Frontend
+
+React + TypeScript + Vite, in `frontend/`. It implements the "InCharacter" flow from
+the Claude Design handoff: library → reader (the open spread is the bookmark) →
+choose a character → conversation with tappable notes → source panel → the same
+question at two bookmarks.
+
+```bash
+cd frontend
+npm install
+npm run dev            # http://localhost:5173 (expects the API on :8000)
+VITE_API_URL=http://host:8000 npm run dev   # point at another backend
+```
+
+- `src/book.ts` paginates `/passages` into spreads (by estimated lines, breaking
+  mid-sentence like print) and finds chapter headings. The bookmark is the last
+  sentence *finished* on the open spread; chat uses `min(bookmark, indexed_through)`.
+- A conversation is keyed by book, character and bookmark, so switching either
+  starts afresh (the brief's rule). Bookmarks are kept in `localStorage`.
+- `src/reply.ts` places each statement's citation notes on the reply sentence it
+  matches best.
+
 ## Backend
 
 Python 3.11+, in `backend/`. One SQLite database (`backend/data/companion.db`)
@@ -36,6 +58,11 @@ always goes through the same steps:
 4. **Recovers rejected records.** At the end it re-checks records the resolver
    rejected, using the model answers saved in the extraction log, and keeps any
    that now pass. To do this by hand: `python -m companion.repair --book N`.
+
+5. **Fills in full names.** It adds "First Last" names the text spells out
+   ("Jay Gatsby") as aliases, with no model calls. The API's `name` is the fullest
+   name known at the bookmark. For a book imported earlier:
+   `python -m companion.names --book N [--dry-run]`.
 
 ### Reading positions
 
