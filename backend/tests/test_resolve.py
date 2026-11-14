@@ -280,6 +280,17 @@ def test_short_invented_key_maps_to_the_one_character_it_names(conn, book):
         assert resolve(conn, book, evidence(character=key), 0, 4).evidence == [], key
 
 
+def test_full_name_without_titles_beats_a_shared_word(conn, book):
+    for name in ("the narrator", "the narrator's father", "Mr. Gatsby", "Gatsby's butler"):
+        conn.execute("INSERT INTO characters (book_id, display_name, first_seen) VALUES (?,?,1)",
+                     (book, name))
+    ids = {r["display_name"]: r["id"] for r in conn.execute("SELECT * FROM characters")}
+    for key, expected in (("narrator", "the narrator"), ("gatsby", "Mr. Gatsby"),
+                          ("butler", "Gatsby's butler"), ("father", "the narrator's father")):
+        chunk = resolve(conn, book, evidence(character=key), 0, 4)
+        assert [e.character for e in chunk.evidence] == [ids[expected]], key
+
+
 def test_redeclared_character_maps_to_the_existing_row(conn, book):
     theo = committed_theo(conn, book)
     candidates = theo_says()

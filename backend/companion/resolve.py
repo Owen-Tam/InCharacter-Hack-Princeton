@@ -189,16 +189,23 @@ def _loose_key(name: str) -> str:
     return " ".join(re.sub(r"[^\w\s]|_", " ", fold(name).casefold()).split())
 
 
-_TITLES = frozenset("mr mrs miss ms mx dr sir lady lord madam mister missus old man".split())
+_TITLES = frozenset("the mr mrs miss ms mx dr sir lady lord madam mister missus old man".split())
 
 
 def _short_names(name: str) -> set[str]:
-    """Shorter ways to refer to a name: 'Mr. Tom Buchanan' -> {'tom buchanan', 'tom', 'buchanan'}."""
+    """Shorter ways to refer to someone: the name without titles, and each name word.
+
+    'Mr. Tom Buchanan' -> {'tom buchanan', 'tom', 'buchanan'}. A possessive word
+    names someone else: 'Gatsby's butler' -> {'gatsby s butler', 'butler'}.
+    """
     words = [w for w in _loose_key(name).split() if w not in _TITLES]
-    out = set()
-    if words:
-        out.add(" ".join(words))
-        out.update(w for w in words if len(w) >= 3)
+    if not words:
+        return set()
+    out = {" ".join(words)}
+    for i, word in enumerate(words):
+        possessive = i + 1 < len(words) and words[i + 1] == "s"
+        if len(word) >= 3 and not possessive:
+            out.add(word)
     return out
 
 
@@ -251,7 +258,8 @@ class _Resolver:
             # Models sometimes invent a key for a known character ("mr_summers"
             # for "id 4: Mr. Summers", "gatsby" for "Mr. Gatsby", "tom" for
             # "Tom Buchanan"). Accept it only if exactly one character matches:
-            # first a full name, then a name without titles or a single name.
+            # first a full name, then a shorter name ("gatsby" is "Mr. Gatsby",
+            # not "Gatsby's butler"; "buchanan" fits Tom and Mrs. Buchanan, so no).
             loose = _loose_key(value)
             for variants in (lambda n: {_loose_key(n)}, _short_names):
                 matches = {ref for known, ref in self.names.items() if loose in variants(known)}
