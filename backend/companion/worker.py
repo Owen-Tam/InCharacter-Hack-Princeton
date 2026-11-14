@@ -190,28 +190,32 @@ def run_import(
     return summary
 
 
-def run_with_resume(run: Callable[[int], ImportSummary], *, resumes: int, wait: float,
-                    target_chars: int = 3500, min_chars: int = 800,
+def run_with_resume(run: Callable[[int, int | None], ImportSummary], *, resumes: int,
+                    wait: float, target_chars: int = 3500, min_chars: int = 800,
+                    detour_chunks: int = 2,
                     say: Callable[[str], None] = print,
                     sleep: Callable[[float], None] = time.sleep) -> ImportSummary:
-    """Call ``run(target_chars)`` again after an API failure; each call resumes at
-    the checkpoint.
+    """Call ``run(chunk_chars, max_chunks)`` again after an API failure; each call
+    resumes at the checkpoint.
 
-    A call that runs out of output tokens (the model can loop on a dense scene)
-    would fail the same way on the same chunk, so the next attempt uses chunks
-    half the size instead of waiting. That does not count against ``resumes``.
+    A call that runs out of output tokens (the model sometimes reasons in circles
+    on a dense scene) is retried at once with chunks half the size, for
+    ``detour_chunks`` chunks only, then the import returns to ``target_chars``.
+    This does not count against ``resumes``.
     """
     from .llm import LLMError
 
     failures = 0
+    size = target_chars
     while True:
+        detour = size < target_chars
         try:
-            return run(target_chars)
+            summary = run(size, detour_chunks if detour else None)
         except LLMError as exc:
-            if "max_output_tokens" in str(exc) and target_chars > min_chars:
-                target_chars = max(min_chars, target_chars // 2)
-                say(f"Output limit hit; resuming with smaller chunks ({target_chars} characters)."
-                    " Committed chunks are kept.")
+            if "max_output_tokens" in str(exc) and size > min_chars:
+                size = max(min_chars, size // 2)
+                say(f"Output limit hit; getting past this passage with smaller chunks"
+                    f" ({size} characters). Committed chunks are kept.")
                 continue
             failures += 1
             if failures > resumes:
@@ -219,6 +223,12 @@ def run_with_resume(run: Callable[[int], ImportSummary], *, resumes: int, wait: 
             say(f"API failure: {exc}. Resuming in {wait:.0f}s"
                 f" ({failures}/{resumes}); committed chunks are kept.")
             sleep(wait)
+            continue
+        if detour and summary.status != "ready":
+            size = target_chars
+            say(f"Past the difficult passage; back to {size}-character chunks.")
+            continue
+        return summary
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -243,10 +253,10 @@ def main(argv: list[str] | None = None) -> int:
     db.init_schema(conn)
     llm = AdaptionLLM(model=args.model, on_call=print)
     summary = run_with_resume(
-        lambda target_chars: run_import(
+        lambda size, limit: run_import(
             conn, args.epub, llm=llm,
             version=args.version or f"{config.PROMPT_VERSION}/{args.model}",
-            target_chars=target_chars, max_chunks=args.max_chunks,
+            target_chars=size, max_chunks=limit if limit is not None else args.max_chunks,
             voice=not args.no_voice,
             log_path=f"{args.db}.extract_log.jsonl", on_progress=print,
         ),
