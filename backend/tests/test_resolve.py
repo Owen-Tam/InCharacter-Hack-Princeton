@@ -252,12 +252,32 @@ def test_invented_key_matching_a_known_name_maps_to_that_character(conn, book):
     conn.execute("INSERT INTO characters (book_id, display_name, first_seen) VALUES (?,?,1)",
                  (book, "Mr. Theo Summers"))
     theo = conn.execute("SELECT id FROM characters").fetchone()[0]
-    for key in ("mr_theo_summers", "MR. THEO SUMMERS", "mr theo summers"):
+    for key in ("mr_theo_summers", "MR. THEO SUMMERS", "mr theo summers", "summers",
+                "theo_summers"):
         chunk = resolve(conn, book, evidence(character=key), 0, 4)
         assert [e.character for e in chunk.evidence] == [theo], key
-    for key in ("summers", "mr_summers_jr", "mr_ada"):  # partial or different names stay unknown
+    for key in ("mr_summers_jr", "mr_ada"):  # different names stay unknown
         chunk = resolve(conn, book, evidence(character=key), 0, 4)
         assert chunk.evidence == [], key
+
+
+def test_short_invented_key_maps_to_the_one_character_it_names(conn, book):
+    for name, aliases in (("Mr. Gatsby", "[]"), ("Tom Buchanan", "[]"),
+                          ("Miss Baker", '[{"name": "Jordan Baker"}]'),
+                          ("Mrs. Buchanan", "[]")):
+        conn.execute("INSERT INTO characters (book_id, display_name, first_seen, aliases)"
+                     " VALUES (?,?,1,?)", (book, name, aliases))
+    ids = {r["display_name"]: r["id"] for r in conn.execute("SELECT * FROM characters")}
+    for key, expected in (("gatsby", "Mr. Gatsby"), ("tom", "Tom Buchanan"),
+                          ("jordan", "Miss Baker"), ("GATSBY", "Mr. Gatsby")):
+        chunk = resolve(conn, book, evidence(character=key), 0, 4)
+        assert [e.character for e in chunk.evidence] == [ids[expected]], key
+    # "buchanan" fits both Buchanans and "baker" fits one name of one character
+    assert resolve(conn, book, evidence(character="buchanan"), 0, 4).evidence == []
+    chunk = resolve(conn, book, evidence(character="baker"), 0, 4)
+    assert [e.character for e in chunk.evidence] == [ids["Miss Baker"]]
+    for key in ("cody", "mr", "jo"):  # unknown, a bare title, too short
+        assert resolve(conn, book, evidence(character=key), 0, 4).evidence == [], key
 
 
 def test_redeclared_character_maps_to_the_existing_row(conn, book):
