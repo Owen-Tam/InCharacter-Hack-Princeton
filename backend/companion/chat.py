@@ -95,6 +95,9 @@ class Retrieved:
     lines: list[VoiceLine]
     snapshot: dict | None
     evidence_total: int
+    # Ids matching the question (or the previous one) and those the last reply
+    # cited; the rest of ``evidence`` is background.
+    topical: set[int] = field(default_factory=set)
 
 
 @dataclass
@@ -271,6 +274,7 @@ def retrieve(
     for item in items:
         if item.id in last_cited:
             chosen.setdefault(item.id, item)
+    topical = set(chosen)
     by_recency = sorted(items, key=lambda i: (i.available_from, i.id), reverse=True)
     if not history:
         fill = by_recency[:recent]
@@ -296,7 +300,7 @@ def retrieve(
     snapshot = json.loads(snapshot_row[0]) if snapshot_row else None
     character = {"id": row["id"], "name": best_name(row, position),
                  "names": known_names(row, position), "first_seen": row["first_seen"]}
-    return Retrieved(book_id, position, character, evidence, lines, snapshot, len(items))
+    return Retrieved(book_id, position, character, evidence, lines, snapshot, len(items), topical)
 
 
 # -- citations -----------------------------------------------------------------
@@ -353,8 +357,15 @@ def render(retrieved: Retrieved, question: str, history: Sequence[dict]) -> str:
     parts.append("VOICE NOTES\n" + ("\n".join(notes) if notes else "(none yet)"))
     lines = "\n".join(f"- \"{line.text}\"" for line in retrieved.lines)
     parts.append("REAL LINES\n" + (lines or "(they have not spoken yet; infer a plausible voice from what they know)"))
-    known = "\n".join(f"[{e.id}] {e.claim}" for e in retrieved.evidence)
-    parts.append("WHAT THEY KNOW\n" + (known or "(nothing recorded yet)"))
+    if not retrieved.evidence:
+        parts.append("WHAT THEY KNOW\n(nothing recorded yet)")
+    else:
+        on_topic = [f"[{e.id}] {e.claim}" for e in retrieved.evidence if e.id in retrieved.topical]
+        background = [f"[{e.id}] {e.claim}" for e in retrieved.evidence if e.id not in retrieved.topical]
+        known = "On the topic:\n" + ("\n".join(on_topic) or "(nothing directly about this)")
+        if background:
+            known += "\n\nIn the background:\n" + "\n".join(background)
+        parts.append("WHAT THEY KNOW\n" + known)
     if history:
         turns = []
         for turn in history[-10:]:

@@ -207,3 +207,18 @@ def test_fresh_draws_favour_newer_facts_and_vary_by_seed():
     newest = sum(i < 10 for d in draws for i in d)
     oldest = sum(i >= 20 for d in draws for i in d)
     assert newest > 2 * oldest
+
+
+def test_render_separates_facts_on_the_topic_from_the_background(conn, story):
+    said = story["claims"]["Theo said it was empty again."]
+    location = story["claims"][LOCATION]
+    got = retrieve(conn, story["book"], story["theo"], 4, "Where is the atlas?")
+    text = render(got, "Where is the atlas?", [])
+    on_topic, background = text.split("In the background:")
+    assert f"[{location}] {LOCATION}" in on_topic
+    assert f"[{said}]" in background.split("THE READER ASKS")[0]
+
+
+def test_render_says_when_nothing_is_on_the_topic(conn, story):
+    got = retrieve(conn, story["book"], story["theo"], 4, "How do you feel?")
+    assert "On the topic:\n(nothing directly about this)" in render(got, "How do you feel?", [])
