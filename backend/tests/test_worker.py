@@ -199,6 +199,50 @@ def test_knowledge_and_next_dialogue_calls_overlap(conn, epub_path):
     assert elapsed < calls * 0.15 * 0.85  # measurably faster than one call at a time
 
 
+def test_two_books_share_one_database_without_mixing(conn, epub_path, tmp_path):
+    lines = "".join(f"<p>“Line {n}.” Theo said.</p>" for n in range(1, 4))
+    other_path = make_epub(tmp_path / "talk.epub", [("c.xhtml", lines)], title="Other Book")
+
+    def other_dialogue(prompt_input):
+        if "Line 1." not in prompt_input:
+            return fixture_llm().replies["report_dialogue"](prompt_input)
+        return {"characters": [{"key": "t", "name": "Theo",
+                                "first_mention": {"para": 1, "text": "Theo said"}}],
+                "aliases": [],
+                "utterances": [{"speaker": "t", "addressee": None,
+                                "quotes": [{"para": 1, "text": "Line 1."}],
+                                "attribution": [{"para": 1, "text": "Theo said"}]}]}
+
+    first = run_import(conn, epub_path, llm=fixture_llm())
+    second = run_import(conn, other_path, llm=FakeLLM({
+        "report_dialogue": other_dialogue, "report_evidence": {"evidence": []}}))
+    assert first.book_id != second.book_id
+    assert counts(conn)["books"] == 2
+
+    # each book has its own "Theo", and nothing crosses over
+    theos = conn.execute(
+        "SELECT book_id, id FROM characters WHERE display_name='Theo' ORDER BY book_id").fetchall()
+    assert [r["book_id"] for r in theos] == [first.book_id, second.book_id]
+    for book_id, theo_id in theos:
+        for table, column in (("utterances", "speaker_id"), ("evidence", "character_id")):
+            rows = conn.execute(f"SELECT book_id FROM {table} WHERE {column}=?", (theo_id,))
+            assert {r["book_id"] for r in rows} <= {book_id}
+        for row in conn.execute("SELECT sources FROM utterances WHERE book_id=?", (book_id,)):
+            for source in json.loads(row["sources"]):
+                owner = conn.execute("SELECT book_id FROM passages WHERE id=?",
+                                     (source["passage_id"],)).fetchone()["book_id"]
+                assert owner == book_id
+    assert len(db.load_characters(conn, first.book_id)) == 2  # Theo, Mara
+    assert len(db.load_characters(conn, second.book_id)) == 1
+
+
+def test_cli_default_database_is_the_shared_file():
+    from companion import config
+    assert config.DB_PATH.name == "companion.db"
+    assert config.DB_PATH.parent.name == "data"
+    assert config.DB_PATH.parent.parent.name == "backend"
+
+
 def test_run_with_resume_retries_api_failures_and_resumes(conn, epub_path):
     from companion.llm import LLMError
     from companion.worker import run_with_resume

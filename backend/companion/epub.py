@@ -20,7 +20,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup, NavigableString
 from bs4.element import Comment, Declaration, Doctype, ProcessingInstruction, Tag
 
-from . import db
+from . import config, db
 from .sentences import split_sentences
 
 with warnings.catch_warnings():
@@ -181,12 +181,14 @@ def _show(passage: db.Passage) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Import an EPUB into the passages table.")
     parser.add_argument("epub", type=Path)
-    parser.add_argument("--db", default="companion.db")
+    parser.add_argument("--db", type=Path, default=config.DB_PATH,
+                        help="shared database for all books (default: backend/data/companion.db)")
     parser.add_argument("--version", default="extract-v1")
     parser.add_argument("--show", type=int, default=8, help="passages to print")
     parser.add_argument("--skip", type=int, default=0, help="passages to skip before printing")
     args = parser.parse_args(argv)
 
+    args.db.parent.mkdir(parents=True, exist_ok=True)
     conn = db.connect(args.db)
     db.init_schema(conn)
     result = import_epub(conn, args.epub, args.version)

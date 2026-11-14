@@ -34,6 +34,10 @@ VOICE_EFFORT = "low"
 
 PROMPTS_DIR = Path(__file__).with_name("prompts")
 
+# The one database the import worker and FastAPI share. Every table is scoped by
+# book_id, so all books (and re-imports under new versions) live in this file.
+DB_PATH = Path(__file__).resolve().parent.parent / "data" / "companion.db"
+
 
 def parse_env(text: str) -> dict[str, str]:
     """Parse ``KEY=value`` lines, allowing spaces around ``=``, quotes and comments."""

@@ -213,7 +213,8 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description="Extract characters, dialogue and evidence from an EPUB.")
     parser.add_argument("epub", type=Path)
-    parser.add_argument("--db", default="companion.db")
+    parser.add_argument("--db", type=Path, default=config.DB_PATH,
+                        help="shared database for all books (default: backend/data/companion.db)")
     parser.add_argument("--model", default=config.EXTRACT_MODEL)
     parser.add_argument("--version", help=f"defaults to {config.PROMPT_VERSION}/<model>")
     parser.add_argument("--max-chunks", type=int)
@@ -224,6 +225,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--resume-wait", type=float, default=120.0)
     args = parser.parse_args(argv)
 
+    args.db.parent.mkdir(parents=True, exist_ok=True)
     conn = db.connect(args.db)
     db.init_schema(conn)
     llm = AdaptionLLM(model=args.model, on_call=print)
