@@ -24,7 +24,7 @@ from .epub import import_epub
 from .extract import (Extraction, dialogue_pass, knowledge_pass, last_known_claims,
                       merge_candidates)
 from .llm import LLM
-from .resolve import resolve_chunk
+from .resolve import ResolvedChunk, fold, resolve_chunk
 from .voice import VoiceJob, ask_voice, plan_voice_jobs, publish_voice, update_voices
 
 
@@ -57,6 +57,47 @@ def _usage(llm) -> tuple[int, int, float]:
     return usage.input_tokens, usage.output_tokens, usage.credits(getattr(llm, "model", ""))
 
 
+def _norm(text: str) -> str:
+    return " ".join(fold(text).casefold().split())
+
+
+def find_paragraph(passages: dict[int, db.Passage], marker: str) -> db.Passage:
+    """The first paragraph whose whole text is ``marker`` (ignoring case, spacing
+    and quote styles); failing that, the first that starts with it."""
+    target = _norm(marker)
+    ordered = sorted(passages.values(), key=lambda p: p.paragraph_pos)
+    for test in (lambda t: t == target, lambda t: t.startswith(target)):
+        for passage in ordered:
+            if test(_norm(passage.text)):
+                return passage
+    raise ValueError(f"no paragraph matches {marker!r}")
+
+
+def story_range(passages: dict[int, db.Passage], story_start: str | None,
+                story_end: str | None) -> tuple[int, int]:
+    """Sentences ``(lo, hi]`` that are the story. ``story_end`` names the first
+    paragraph after the story (e.g. "AFTERWORD")."""
+    total = max((p.last_sentence for p in passages.values()), default=0)
+    lo = find_paragraph(passages, story_start).first_sentence - 1 if story_start else 0
+    hi = find_paragraph(passages, story_end).first_sentence - 1 if story_end else total
+    if hi <= lo:
+        raise ValueError("the story end comes before the story start")
+    return lo, hi
+
+
+def _saved_range(log_path: str | Path | None, book_id: int) -> tuple[int, int] | None:
+    if not log_path or not Path(log_path).exists():
+        return None
+    saved = None
+    with open(log_path, encoding="utf-8") as handle:
+        for line in handle:
+            if '"story_range"' in line:
+                entry = json.loads(line)
+                if entry.get("book_id") == book_id:
+                    saved = tuple(entry["story_range"])
+    return saved
+
+
 def run_import(
     conn: sqlite3.Connection,
     epub_path: str | Path,
@@ -69,7 +110,13 @@ def run_import(
     voice: bool = True,
     log_path: str | Path | None = None,
     on_progress: Callable[[str], None] | None = None,
+    story_start: str | None = None,
+    story_end: str | None = None,
 ) -> ImportSummary:
+    """Extract a book chunk by chunk. ``story_start``/``story_end`` limit the
+    model to the story itself: text before and after (contents, forewords,
+    afterwords) stays readable but is never sent to the model, so no character
+    can learn from it. The range is saved in the log and reused on reruns."""
     imported = import_epub(conn, epub_path, version)
     book_id = imported.book_id
     book = _book(conn, book_id)
@@ -78,11 +125,34 @@ def run_import(
     if book["status"] == "ready":
         return summary
 
-    passages = db.load_passages(conn, book_id)
-    chunks = plan_chunks(passages.values(), book["indexed_through"],
-                         target_chars=target_chars, prefix_chars=prefix_chars)
-    _set_status(conn, book_id, "indexing")
     say = on_progress or (lambda message: None)
+    passages = db.load_passages(conn, book_id)
+    if story_start or story_end:
+        lo, hi = story_range(passages, story_start, story_end)
+        if log_path and _saved_range(log_path, book_id) != (lo, hi):
+            with open(log_path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps({"book_id": book_id, "story_range": [lo, hi]}) + "\n")
+    else:
+        lo, hi = _saved_range(log_path, book_id) or (0, imported.sentences)
+    has_tail = hi < imported.sentences
+    if (lo, hi) != (0, imported.sentences):
+        say(f"Story: sentences {lo + 1}-{hi} of {imported.sentences};"
+            " the rest is kept as text but never sent to the model.")
+
+    _set_status(conn, book_id, "indexing")
+    if book["indexed_through"] < lo:  # front matter: commit as done, no model calls
+        commit_chunk(conn, book_id, ResolvedChunk(book["indexed_through"], lo))
+        say(f"Skipped sentences {book['indexed_through'] + 1}-{lo} (before the story).")
+    checkpoint = max(book["indexed_through"], lo)
+    story = [p for p in passages.values() if p.first_sentence > lo and p.last_sentence <= hi]
+    chunks = plan_chunks(story, checkpoint, target_chars=target_chars, prefix_chars=prefix_chars)
+
+    def finish_tail() -> None:
+        """Back matter: commit as done once the story is finished."""
+        if has_tail and _book(conn, book_id)["indexed_through"] == hi:
+            commit_chunk(conn, book_id, ResolvedChunk(hi, imported.sentences), final=True)
+            say(f"Skipped sentences {hi + 1}-{imported.sentences} (after the story).")
+
     log = open(log_path, "a", encoding="utf-8") if log_path else None
     if max_chunks is not None:
         chunks_to_run = chunks[:max_chunks]
@@ -108,6 +178,7 @@ def run_import(
 
     try:
         if not chunks:  # everything committed; a crash may have skipped the last snapshots
+            finish_tail()
             if voice:
                 summary.added["snapshots"] += len(
                     update_voices(conn, llm, book_id, book["indexed_through"]))
@@ -139,7 +210,8 @@ def run_import(
                                     dialogue, knowledge)
             resolved = resolve_chunk(extraction.candidates, chunk.passages, characters,
                                      chunk.start, chunk.through)
-            result = commit_chunk(conn, book_id, resolved, final=number == len(chunks) - 1)
+            result = commit_chunk(conn, book_id, resolved,
+                                  final=number == len(chunks) - 1 and not has_tail)
             voices = publish_voices()
             request_voices(chunk.through)
             pending = new
@@ -175,6 +247,8 @@ def run_import(
             summary.added["snapshots"] += len(final_voices)
             if final_voices:
                 say(f"published {len(final_voices)} final voice snapshots")
+        if chunks and summary.chunks_run == len(chunks):
+            finish_tail()
     except CheckpointMismatch as exc:
         say(f"stopped: {exc} (another worker is probably running)")
     except BaseException:
@@ -245,6 +319,8 @@ def extract_book(
     log_path: Path | None = None,
     resumes: int = 5,
     resume_wait: float = 120.0,
+    story_start: str | None = None,
+    story_end: str | None = None,
     stay_awake: bool = True,
     say: Callable[[str], None] = print,
     sleep: Callable[[float], None] = time.sleep,
@@ -268,7 +344,8 @@ def extract_book(
             lambda size, limit: run_import(
                 conn, epub_path, llm=llm, version=version, target_chars=size,
                 max_chunks=limit if limit is not None else max_chunks, voice=voice,
-                log_path=log_path, on_progress=say),
+                log_path=log_path, on_progress=say,
+                story_start=story_start, story_end=story_end),
             resumes=resumes, wait=resume_wait, target_chars=target_chars,
             say=say, sleep=sleep)
 
@@ -299,6 +376,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--resumes", type=int, default=5,
                         help="times to wait and resume after the API keeps failing")
     parser.add_argument("--resume-wait", type=float, default=120.0)
+    parser.add_argument("--story-start", metavar="TEXT",
+                        help="text of the paragraph where the story begins (e.g. a first chapter"
+                             " heading); everything before it is never sent to the model")
+    parser.add_argument("--story-end", metavar="TEXT",
+                        help="text of the first paragraph after the story (e.g. AFTERWORD);"
+                             " it and everything after are never sent to the model")
     args = parser.parse_args(argv)
 
     args.db.parent.mkdir(parents=True, exist_ok=True)
@@ -311,6 +394,7 @@ def main(argv: list[str] | None = None) -> int:
         target_chars=args.target_chars, max_chunks=args.max_chunks, voice=not args.no_voice,
         log_path=Path(f"{args.db}.extract_log.jsonl"),
         resumes=args.resumes, resume_wait=args.resume_wait,
+        story_start=args.story_start, story_end=args.story_end,
     )
     tokens_in, tokens_out, credits = _usage(llm)
     print(f"book {summary.book_id} {summary.title!r}: {summary.status},"

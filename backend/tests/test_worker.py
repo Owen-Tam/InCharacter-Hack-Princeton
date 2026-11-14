@@ -24,19 +24,19 @@ def in_target(prompt_input, para):
     return f"[¶{para}]" in prompt_input.split("TARGET", 1)[1]
 
 
-def fixture_llm(**kwargs):
-    """Answers with the fixture only when its paragraph (¶2) is in TARGET."""
+def fixture_llm(para=2, **kwargs):
+    """Answers with the fixture only when its paragraph (¶para) is in TARGET."""
     def dialogue(prompt_input):
-        if not in_target(prompt_input, 2):
+        if not in_target(prompt_input, para):
             return {"characters": [], "aliases": [], "utterances": []}
         c = fixture_candidates()
-        return {"characters": remap(c["characters"], 2), "aliases": [],
-                "utterances": remap(c["utterances"], 2)}
+        return {"characters": remap(c["characters"], para), "aliases": [],
+                "utterances": remap(c["utterances"], para)}
 
     def knowledge(prompt_input):
-        if not in_target(prompt_input, 2):
+        if not in_target(prompt_input, para):
             return {"evidence": []}
-        return {"evidence": remap(fixture_candidates()["evidence"], 2)}
+        return {"evidence": remap(fixture_candidates()["evidence"], para)}
 
     return FakeLLM({"report_dialogue": dialogue, "report_evidence": knowledge}, **kwargs)
 
@@ -388,6 +388,71 @@ def test_extract_book_can_skip_staying_awake_and_needs_no_log(conn, epub_path, m
     summary = worker.extract_book(conn, epub_path, llm=fixture_llm(), stay_awake=False,
                                   say=lambda m: None)
     assert summary.status == "ready"
+
+
+FRONT = "<p>Contents</p><p>Foreword: everyone in the house was later arrested.</p>"
+BACK = "<p>AFTERWORD</p><p>Theo died years later, far away.</p><p>Index</p>"
+
+
+@pytest.fixture
+def framed_epub(tmp_path):
+    return make_epub(tmp_path / "framed.epub", [
+        ("front.xhtml", FRONT), ("Text/ch01.xhtml", FIXTURE_HTML), ("back.xhtml", BACK)])
+
+
+def test_story_range_keeps_front_and_back_matter_away_from_the_model(conn, framed_epub, tmp_path):
+    log = tmp_path / "log.jsonl"
+    llm = fixture_llm(para=4)  # after "Contents" and the foreword
+    notes = []
+    summary = run_import(conn, framed_epub, llm=llm, log_path=log, on_progress=notes.append,
+                         story_start="Chapter One", story_end="afterword")
+    assert summary.status == "ready" and summary.indexed_through == summary.sentences
+    sent = " ".join(call["input"] for call in llm.calls)
+    assert "arrested" not in sent and "died years later" not in sent and "Contents" not in sent
+    assert "Theo stepped outside" in sent
+    assert any("Skipped sentences 1-" in n and "before the story" in n for n in notes)
+    assert any("after the story" in n for n in notes)
+    # the fixture's records still land at the right sentences
+    theo = conn.execute("SELECT id FROM characters WHERE display_name='Theo'").fetchone()[0]
+    assert "Theo was shown the letter inside the atlas." in claims(conn, theo, summary.sentences)
+
+
+def test_story_range_is_remembered_when_rerun_without_the_options(conn, framed_epub, tmp_path):
+    log = tmp_path / "log.jsonl"
+    first = run_import(conn, framed_epub, llm=fixture_llm(), log_path=log, target_chars=20,
+                       prefix_chars=0, max_chunks=1,
+                       story_start="Chapter One", story_end="AFTERWORD")
+    assert first.status == "indexing"
+    llm = fixture_llm()
+    second = run_import(conn, framed_epub, llm=llm, log_path=log, target_chars=20, prefix_chars=0)
+    assert second.status == "ready"
+    sent = " ".join(call["input"] for call in llm.calls)
+    assert "died years later" not in sent and "Index" not in sent
+    assert sum('"story_range"' in line for line in log.read_text().splitlines()) == 1
+
+
+@pytest.mark.parametrize("start,end,message", [
+    ("Nothing like this", None, "no paragraph matches"),
+    ("AFTERWORD", "Chapter One", "comes before"),
+])
+def test_bad_story_markers_are_refused(conn, framed_epub, start, end, message):
+    with pytest.raises(ValueError, match=message):
+        run_import(conn, framed_epub, llm=fixture_llm(), story_start=start, story_end=end)
+
+
+def test_find_paragraph_prefers_an_exact_match_and_ignores_quote_style():
+    from companion.worker import find_paragraph
+    from helpers import make_epub as _  # noqa: F401  (keeps helper import style consistent)
+    from companion.db import Passage
+
+    def p(pos, text):
+        return Passage(pos, 1, pos, "a", pos, pos, (len(text),), text)
+
+    passages = {1: p(1, "Born June 12, 1942, she wrote."), 2: p(2, "June 12, 1942"),
+                3: p(3, "ANNE’S DIARY ENDS HERE.")}
+    assert find_paragraph(passages, "june 12, 1942").paragraph_pos == 2
+    assert find_paragraph(passages, "Born June").paragraph_pos == 1
+    assert find_paragraph(passages, "ANNE'S DIARY ENDS HERE").paragraph_pos == 3
 
 
 def test_cli_requires_a_key(monkeypatch, tmp_path, epub_path):
