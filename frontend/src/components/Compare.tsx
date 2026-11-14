@@ -14,7 +14,7 @@ export interface CompareSeed {
 function momentLabel(model: BookModel, position: number) {
   const spread = spreadForPosition(model, position)
   const chapter = chapterLabel(model, position)
-  return `Bookmark · ${chapter ? `${chapter}, ` : ''}page ${spread.firstPage + 1}`
+  return `Bookmark · ${chapter ? `${chapter}, ` : ''}page ${spread.firstPage}`
 }
 
 function Moment({ label, name, reply, model, later, newSince }: {
@@ -95,6 +95,7 @@ export function Compare({ book, model, character, seed, page, onBackToChat, onBa
   const firstCh = model.chapters[0]?.label.replace(/^chapter\s+/i, '')
   const lastCh = model.chapters[model.chapters.length - 1]?.label.replace(/^chapter\s+/i, '')
   const earlierChapter = early ? chapterLabel(model, early.position) : null
+  const notMetYet = other < character.first_seen
 
   return (
     <div className="app">
@@ -125,8 +126,11 @@ export function Compare({ book, model, character, seed, page, onBackToChat, onBa
               <p className="muted" style={{ margin: 0 }}>
                 Move the bookmark on the timeline below, then ask again. {character.name.replace(/^the\s/, 'The ')} will know only what they could know by then.
               </p>
+              {notMetYet && (
+                <span className="notice">You haven't met {inSentence(character.name)} by this bookmark yet. Move it later.</span>
+              )}
               <div>
-                <button className="btn" onClick={askAgain} disabled={pending || other === seed.position}>
+                <button className="btn" onClick={askAgain} disabled={pending || other === seed.position || notMetYet}>
                   {pending ? `${character.name.replace(/^the\s/, 'The ')} is thinking…` : 'Ask again at this bookmark'}
                 </button>
               </div>
@@ -146,8 +150,13 @@ export function Compare({ book, model, character, seed, page, onBackToChat, onBa
               type="range" min={1} max={max} value={other}
               aria-label="Second bookmark"
               onChange={(e) => {
-                // Snap to the end of a spread, as the reader's own bookmark does.
-                setOther(Math.min(max, spreadForPosition(model, Number(e.target.value)).position))
+                // Snap to the end of a spread, as the reader's own bookmark does. Moving
+                // back lands on the previous spread, or a step left would snap straight back.
+                const value = Number(e.target.value)
+                const spread = spreadForPosition(model, value)
+                let next = spread.position
+                if (value < other && next >= other && spread.index > 0) next = model.spreads[spread.index - 1].position
+                setOther(Math.min(max, next))
                 setResult(null)
               }}
             />

@@ -79,7 +79,7 @@ export function Cast({ book, model, position, page, onPick, onBack, onHome }: {
             <BookmarkRule />
           </div>
           <div className="side-note">
-            Characters appear here once you have met them in the book. Each knows only what they could know by your bookmark.
+            The main characters appear here once you have met them in the book. Each knows only what they could know by your bookmark.
           </div>
         </aside>
         <main className="cast">
@@ -92,7 +92,7 @@ export function Cast({ book, model, position, page, onPick, onBack, onHome }: {
               <div className="empty">
                 {book.indexed_through === 0
                   ? 'The importer is still learning who is in this book. Try again in a minute.'
-                  : "You haven't met anyone yet. Read on a little."}
+                  : "You haven't met any of the main characters yet. Read on a little."}
               </div>
             )}
             {cast?.map((c) => (

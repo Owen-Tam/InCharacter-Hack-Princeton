@@ -37,6 +37,7 @@ export interface Character {
 export interface Turn {
   role: 'reader' | 'character'
   text: string
+  evidence_ids?: number[]
 }
 
 export interface CitationSource {
@@ -78,6 +79,7 @@ export interface ChatReply {
   statements: Statement[]
   unsupported_statements: string[]
   voice_lines: VoiceLine[]
+  retrieved_evidence_ids: number[]
 }
 
 export class ApiError extends Error {

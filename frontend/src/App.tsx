@@ -220,7 +220,7 @@ function CharacterLoader({ bookId, characterId, position, onLoaded, onHome }: {
     api.characters(bookId, position).then((cast) => {
       const c = cast.find((x) => x.id === characterId)
       if (c) onLoaded(c)
-      else setMissing("You haven't met this character by your bookmark.")
+      else setMissing("You can talk with the main characters you have met by your bookmark, and this isn't one of them.")
     }, (e) => setMissing(e.message))
   }, [bookId, characterId, position, onLoaded])
   return (
@@ -228,7 +228,7 @@ function CharacterLoader({ bookId, characterId, position, onLoaded, onHome }: {
       <TopBar onBrand={onHome} />
       <div className="center-msg">
         <span>{missing ?? 'Finding them…'}</span>
-        {missing && <button className="btn" onClick={() => go({ screen: 'cast', bookId })}>Choose someone you've met</button>}
+        {missing && <button className="btn" onClick={() => go({ screen: 'cast', bookId })}>Choose a main character</button>}
       </div>
     </div>
   )

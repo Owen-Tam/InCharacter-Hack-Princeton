@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import math
+import random
 import re
 import sqlite3
 from collections import Counter
@@ -142,6 +143,32 @@ def best_name(row: sqlite3.Row, position: int) -> str:
     return row["display_name"]
 
 
+def pick_main(scores: dict[int, int]) -> set[int]:
+    """The main characters from whole-book scores: those within MAIN_SHARE of the
+    leader, topped up to MAIN_MIN and capped at MAIN_MAX. Never anyone scoring 0."""
+    ranked = sorted((cid for cid, score in scores.items() if score > 0), key=lambda c: -scores[c])
+    if not ranked:
+        return set()
+    cutoff = scores[ranked[0]] * config.MAIN_SHARE
+    main = [cid for cid in ranked if scores[cid] >= cutoff]
+    if len(main) < config.MAIN_MIN:
+        main = ranked[:config.MAIN_MIN]
+    return set(main[:config.MAIN_MAX])
+
+
+def main_characters(conn: sqlite3.Connection, book_id: int) -> set[int]:
+    """Main characters by their part in the whole indexed book (not the bookmark):
+    who counts as main never changes as the reader moves."""
+    scores: dict[int, int] = {}
+    for cid, n in conn.execute("SELECT speaker_id, count(*) FROM utterances WHERE book_id=?"
+                               " AND speaker_id IS NOT NULL GROUP BY speaker_id", (book_id,)):
+        scores[cid] = scores.get(cid, 0) + 2 * n
+    for cid, n in conn.execute("SELECT character_id, count(*) FROM evidence WHERE book_id=?"
+                               " GROUP BY character_id", (book_id,)):
+        scores[cid] = scores.get(cid, 0) + n
+    return pick_main(scores)
+
+
 def book_row(conn: sqlite3.Connection, book_id: int) -> sqlite3.Row:
     row = conn.execute("SELECT * FROM books WHERE id=?", (book_id,)).fetchone()
     if row is None:
@@ -197,10 +224,32 @@ def rank_evidence(items: Sequence[EvidenceItem], question: str) -> list[tuple[fl
     return scored
 
 
+def cited_so_far(history: Sequence[dict]) -> tuple[set[int], set[int]]:
+    """Evidence ids the character's last reply cited, and those cited only before it."""
+    replies = [set(t.get("evidence_ids") or []) for t in history if t.get("role") == "character"]
+    last = replies[-1] if replies else set()
+    earlier = set().union(*replies[:-1]) - last if len(replies) > 1 else set()
+    return last, earlier
+
+
+def _fresh(items: Sequence[EvidenceItem], count: int, seed: str) -> list[EvidenceItem]:
+    """``count`` items drawn without replacement, the newer more likely
+    (weighted reservoir sampling). Reproducible for a given seed."""
+    rng = random.Random(seed)
+    # Weight 1/(rank+1): key = u ** (1/weight). ``items`` come newest first.
+    keyed = [(rng.random() ** (rank + 1), item) for rank, item in enumerate(items)]
+    return [item for _, item in sorted(keyed, key=lambda k: -k[0])[:count]]
+
+
 def retrieve(
     conn: sqlite3.Connection, book_id: int, character_id: int, position: int,
-    question: str, *, relevant: int = 10, recent: int = 6, max_lines: int = 8,
+    question: str, history: Sequence[dict] = (), *, relevant: int = 10, recent: int = 6,
+    max_lines: int = 8,
 ) -> Retrieved:
+    """What the character may draw on for this question. On the first turn: the
+    facts matching the question plus the most recent ones. Later turns keep the
+    last reply's facts (for follow-ups), rank facts cited earlier lower, match on
+    the previous question too, and fill open slots with facts not yet cited."""
     book = book_row(conn, book_id)
     check_position(book, position)
     row = character_row(conn, book_id, character_id, position)
@@ -210,12 +259,27 @@ def retrieve(
         EvidenceItem(r["id"], r["claim"], r["basis"], r["available_from"], json.loads(r["sources"]))
         for r in conn.execute(EVIDENCE_SQL, params)
     ]
+    last_cited, earlier_cited = cited_so_far(history)
+    previous = [t.get("text", "") for t in history if t.get("role") == "reader"][-1:]
+    ranked = [(score * (config.CHAT_USED_PENALTY if item.id in earlier_cited else 1), item)
+              for score, item in rank_evidence(items, " ".join([question, *previous]))]
     chosen: dict[int, EvidenceItem] = {}
-    for score, item in sorted(rank_evidence(items, question), key=lambda s: (-s[0], -s[1].available_from)):
+    for score, item in sorted(ranked, key=lambda s: (-s[0], -s[1].available_from)):
         if score <= 0 or len(chosen) >= relevant:
             break
         chosen[item.id] = item
-    for item in sorted(items, key=lambda i: (i.available_from, i.id))[-recent:]:
+    for item in items:
+        if item.id in last_cited:
+            chosen.setdefault(item.id, item)
+    by_recency = sorted(items, key=lambda i: (i.available_from, i.id), reverse=True)
+    if not history:
+        fill = by_recency[:recent]
+    else:
+        used = last_cited | earlier_cited
+        pool = [i for i in by_recency if i.id not in used and i.id not in chosen][:config.CHAT_FRESH_POOL]
+        turns = sum(1 for t in history if t.get("role") == "character")
+        fill = _fresh(pool, recent, f"{character_id}:{position}:{turns}")
+    for item in fill:
         chosen.setdefault(item.id, item)
     evidence = sorted(chosen.values(), key=lambda i: (i.available_from, i.id))
 
@@ -340,7 +404,7 @@ def chat(conn: sqlite3.Connection, llm: LLM, book_id: int, character_id: int,
     question = question.strip()
     if not question:
         raise ChatError(400, "the question is empty")
-    retrieved = retrieve(conn, book_id, character_id, position, question)
+    retrieved = retrieve(conn, book_id, character_id, position, question, history)
     reply, statements, unsupported = compose(llm, retrieved, question, history)
     by_id = {e.id: e for e in retrieved.evidence}
     cited = list(dict.fromkeys(i for s in statements for i in s["evidence_ids"]))

@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from . import config, db
-from .chat import ChatError, best_name, book_row, character_row, chat, check_position, clamp, known_names, load_passage
+from .chat import ChatError, best_name, book_row, main_characters, character_row, chat, check_position, clamp, known_names, load_passage
 from .epub import import_epub
 from .llm import LLM, LLMError
 
@@ -31,6 +31,9 @@ from .llm import LLM, LLMError
 class Turn(BaseModel):
     role: Literal["reader", "character"]
     text: str
+    evidence_ids: list[int] = Field(default_factory=list, description=(
+        "For a character turn: the evidence ids its statements cited, so later"
+        " replies can bring up something new."))
 
 
 class ChatRequest(BaseModel):
@@ -213,16 +216,20 @@ def create_app(
                 "next_start": next_start if next_start and next_start <= last else None}
 
     @app.get("/books/{book_id}/characters")
-    def get_characters(book_id: int, position: int | None = None,
+    def get_characters(book_id: int, position: int | None = None, everyone: bool = False,
                        conn: sqlite3.Connection = Depends(get_conn)) -> list[dict]:
-        """Characters the reader has met by ``position`` (default: everything indexed),
-        with only the names revealed by then."""
+        """The main characters the reader has met by ``position`` (default: everything
+        indexed), with only the names revealed by then. Who counts as main is decided
+        by the whole book; ``everyone=true`` lists minor characters too."""
         book = book_row(conn, book_id)
         if position is None:
             position = book["indexed_through"]
+        main = None if everyone else main_characters(conn, book_id)
         out = []
         for r in conn.execute("SELECT * FROM characters WHERE book_id=? AND first_seen<=?"
                               " ORDER BY first_seen, id", (book_id, position)):
+            if main is not None and r["id"] not in main:
+                continue
             lines, last_heard = conn.execute(
                 "SELECT count(*), max(available_from) FROM utterances WHERE book_id=? AND speaker_id=?"
                 " AND available_from<=?", (book_id, r["id"], position)).fetchone()
@@ -259,6 +266,7 @@ def create_app(
             "statements": result.statements,
             "unsupported_statements": result.unsupported,
             "voice_lines": result.voice_lines,
+            "retrieved_evidence_ids": result.retrieved_evidence_ids,
         }
 
     return app

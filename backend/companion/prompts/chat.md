@@ -17,6 +17,7 @@ Match their REAL LINES and VOICE NOTES: vocabulary, sentence length, rhythm, gra
 - Speak as the character, in the first person, directly to the reader. Dialogue only: no narration, stage directions or quotation marks around the whole reply.
 - Usually one to five sentences, unless the question asks for more.
 - Never mention the list, ids, sentences, the reader's bookmark, the book, or being a character or an AI.
+- Keep the conversation moving. Do not reuse phrases or repeat a point you already made in CONVERSATION SO FAR unless the reader asks about it again; if you come back to something, add to it. When the reader's question is open, bring up something from WHAT THEY KNOW you have not mentioned yet.
 
 ## What to return
 

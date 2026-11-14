@@ -156,3 +156,54 @@ def test_character_with_no_lines_still_gets_a_prompt(conn, story):
     got = retrieve(conn, story["book"], story["mara"], 4, "What did you do?")
     assert got.lines == []
     assert "(they have not spoken yet" in render(got, "What did you do?", [])
+
+
+# -- keeping a conversation fresh --------------------------------------------------
+
+def test_a_follow_up_keeps_the_facts_the_last_reply_cited(conn, story):
+    location = story["claims"][LOCATION]
+    history = [{"role": "reader", "text": "Hello"},
+               {"role": "character", "text": "In the atlas.", "evidence_ids": [location]}]
+    got = retrieve(conn, story["book"], story["theo"], 4, "Really?", history, recent=0)
+    assert [e.id for e in got.evidence] == [location]
+
+
+def test_the_previous_question_is_searched_too(conn, story):
+    history = [{"role": "reader", "text": "Where is the letter?"},
+               {"role": "character", "text": "Hm.", "evidence_ids": []}]
+    got = retrieve(conn, story["book"], story["theo"], 4, "Why?", history, recent=0)
+    assert LOCATION in [e.claim for e in got.evidence]
+
+
+def test_open_slots_skip_facts_already_cited(conn, story):
+    said = story["claims"]["Theo said it was empty again."]
+    location = story["claims"][LOCATION]
+    history = [{"role": "reader", "text": "Hi"},
+               {"role": "character", "text": "Empty again.", "evidence_ids": [said]},
+               {"role": "reader", "text": "Hm"},
+               {"role": "character", "text": "Atlas.", "evidence_ids": [location]}]
+    got = retrieve(conn, story["book"], story["theo"], 4, "How do you feel?", history)
+    ids = [e.id for e in got.evidence]
+    assert location in ids  # cited last: kept for a follow-up
+    assert said not in ids  # cited before that, and not asked about
+
+
+def test_facts_cited_earlier_still_come_back_when_asked_about(conn, story):
+    location = story["claims"][LOCATION]
+    history = [{"role": "reader", "text": "Hi"},
+               {"role": "character", "text": "Atlas.", "evidence_ids": [location]},
+               {"role": "reader", "text": "Hm"},
+               {"role": "character", "text": "Hm.", "evidence_ids": []}]
+    got = retrieve(conn, story["book"], story["theo"], 4, "The atlas again?", history, recent=0)
+    assert [e.id for e in got.evidence] == [location]
+
+
+def test_fresh_draws_favour_newer_facts_and_vary_by_seed():
+    from companion.chat import EvidenceItem, _fresh
+    items = [EvidenceItem(i, f"fact {i}", "observed", 100 - i, []) for i in range(30)]  # newest first
+    draws = [[i.id for i in _fresh(items, 6, f"seed{n}")] for n in range(200)]
+    assert _fresh(items, 6, "same") == _fresh(items, 6, "same")
+    assert len({tuple(d) for d in draws}) > 100
+    newest = sum(i < 10 for d in draws for i in d)
+    oldest = sum(i >= 20 for d in draws for i in d)
+    assert newest > 2 * oldest

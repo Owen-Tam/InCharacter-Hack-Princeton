@@ -21,7 +21,9 @@ export interface Conversation {
 export const conversationKey = (bookId: number, characterId: number, position: number) => `${bookId}:${characterId}:${position}`
 
 export function historyOf(messages: Message[]): Turn[] {
-  return messages.map((m) => (m.role === 'reader' ? { role: 'reader', text: m.text } : { role: 'character', text: m.reply.reply }))
+  return messages.map((m) => (m.role === 'reader'
+    ? { role: 'reader', text: m.text }
+    : { role: 'character', text: m.reply.reply, evidence_ids: [...new Set(m.reply.statements.flatMap((s) => s.evidence_ids))] }))
 }
 
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
@@ -186,7 +188,7 @@ export function ConversationScreen({ book, model, position, page, character, con
         )}
         <main className="convo">
           <div className="convo-head">
-            <span className="kicker">A conversation with</span>
+            <span className="kicker">Talk to</span>
             <span className="name">{name}</span>
           </div>
           <div className="messages" ref={scroller} aria-live="polite">
@@ -212,7 +214,6 @@ export function ConversationScreen({ book, model, position, page, character, con
                     onDone={() => settle(i)}
                   />
                   <div className="msg-foot" style={{ opacity: m.fresh ? 0 : 1 }}>
-                    <span className="imagined">Imagined reply</span>
                     {sourcesLabel(m.reply, model) && (
                       <button className="link-quiet" onClick={() => setSource({ msg: i, note: 0 })}>{sourcesLabel(m.reply, model)}</button>
                     )}

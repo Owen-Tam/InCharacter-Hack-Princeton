@@ -36,6 +36,12 @@ VOICE_EFFORT = "low"
 
 PROMPTS_DIR = Path(__file__).with_name("prompts")
 
+# Main characters: ranked over the whole book by 2 x lines spoken + facts known.
+# Main = at least MAIN_SHARE of the top score, keeping MAIN_MIN..MAIN_MAX of them.
+MAIN_SHARE = 0.2
+MAIN_MIN = 3
+MAIN_MAX = 8
+
 # The one database the import worker and FastAPI share. Every table is scoped by
 # book_id, so all books (and re-imports under new versions) live in this file.
 # COMPANION_DB overrides it (tests, or a copy for experiments).
@@ -49,6 +55,11 @@ CHAT_EFFORT: str | None = "low"
 CHAT_TEMPERATURE = 0.7
 # Includes reasoning tokens; Qwen used over 4000 on a simple question.
 CHAT_MAX_TOKENS = 16000
+# Keeping a conversation fresh: facts cited before the last reply score this
+# fraction when ranked (still used when the question is about them), and open
+# slots are drawn from this many most recent facts not yet cited.
+CHAT_USED_PENALTY = 0.4
+CHAT_FRESH_POOL = 40
 
 
 def parse_env(text: str) -> dict[str, str]:

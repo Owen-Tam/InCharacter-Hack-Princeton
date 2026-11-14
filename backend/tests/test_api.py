@@ -62,6 +62,18 @@ def test_characters_depend_on_the_bookmark(setup):
     assert theo["lines"] == 1 and theo["facts"] == 2 and theo["has_voice_profile"] is False
 
 
+def test_only_main_characters_are_listed(setup, tmp_path):
+    conn = db.connect(tmp_path / "companion.db")
+    conn.execute("INSERT INTO characters (book_id, display_name, first_seen) VALUES (?, 'a passer-by', 1)",
+                 (setup["book"],))
+    conn.close()
+    client, book = setup["client"], setup["book"]
+    main = client.get(f"/books/{book}/characters", params={"position": 4}).json()
+    assert [c["name"] for c in main] == ["Theo", "Mara"]
+    everyone = client.get(f"/books/{book}/characters", params={"position": 4, "everyone": True}).json()
+    assert [c["name"] for c in everyone] == ["Theo", "a passer-by", "Mara"]
+
+
 def test_characters_say_when_they_were_last_heard(setup):
     client = setup["client"]
     at_2 = client.get(f"/books/{setup['book']}/characters", params={"position": 2}).json()
@@ -82,6 +94,18 @@ def test_chat_returns_a_cited_imagined_reply(setup):
     assert body["citations"][0]["sources"][0]["quote"] == "Mara showed him the letter inside the atlas."
     assert body["unsupported_statements"] == []
     assert "Reader: Hi" in setup["llm"].calls[0]["input"]
+
+
+def test_chat_takes_cited_ids_in_history_and_reports_what_it_retrieved(setup):
+    response = setup["client"].post("/chat", json={
+        "book_id": setup["book"], "character_id": setup["theo"], "position": 4,
+        "question": "Really?", "history": [
+            {"role": "reader", "text": "Where is the letter?"},
+            {"role": "character", "text": "In the atlas.", "evidence_ids": [1, 2]}]})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["retrieved_evidence_ids"]
+    assert {c["evidence_id"] for c in body["citations"]} <= set(body["retrieved_evidence_ids"])
 
 
 @pytest.mark.parametrize("payload,status", [
