@@ -115,6 +115,43 @@ def test_a_later_speaker_tag_pushes_eligibility_past_the_quote(conn, book):
     assert chunk.utterances[0].available_from == 4
 
 
+REPEATED = ("“Allen,” Mr. Summers said. “Anderson,” Mr. Summers said."
+            " “Bentham,” Mr. Summers said.")
+
+
+def test_repeated_speech_tag_resolves_to_the_copy_next_to_its_quote(conn):
+    book_id = db.create_book(conn, "Tags", "tags-hash", "v1")
+    from companion.sentences import split_sentences
+    db.insert_passage(conn, book_id, id=7, paragraph_pos=1, href="a", para_no=0,
+                      first_sentence=1, sentence_ends=split_sentences(REPEATED), text=REPEATED)
+    candidates = {"utterances": [
+        {"speaker": None, "quotes": [{"para": 1, "text": name}],
+         "attribution": [{"para": 1, "text": "Mr. Summers said"}]}
+        for name in ("Allen,", "Anderson,", "Bentham,")]}
+    chunk = resolve(conn, book_id, candidates, 0, 3)
+    assert chunk.rejects == []
+    tags = [u.sources[1] for u in chunk.utterances]
+    assert [REPEATED[t["lo"]:t["lo"] + 3] for t in tags] == ["Mr.", "Mr.", "Mr."]
+    assert [t["lo"] for t in tags] == sorted({t["lo"] for t in tags})  # three different copies
+    assert [u.available_from for u in chunk.utterances] == [1, 2, 3]
+
+
+def test_explicit_occurrence_still_wins_over_proximity(conn):
+    book_id = db.create_book(conn, "Tags", "tags-hash", "v1")
+    db.insert_passage(conn, book_id, id=7, paragraph_pos=1, href="a", para_no=0,
+                      first_sentence=1, sentence_ends=[len(REPEATED)], text=REPEATED)
+    chunk = resolve(conn, book_id, {"utterances": [
+        {"speaker": None, "quotes": [{"para": 1, "text": "Allen,"}],
+         "attribution": [{"para": 1, "text": "Mr. Summers said", "occurrence": 3}]}]}, 0, 1)
+    assert chunk.utterances[0].sources[1]["lo"] == REPEATED.rindex("Mr. Summers said")
+
+
+def test_support_span_with_added_quote_marks_is_still_found(conn, book):
+    chunk = resolve(conn, book, evidence(support=[{"para": 1, "text": '"Theo returned and"'}]), 0, 4)
+    assert chunk.rejects == []
+    assert chunk.evidence[0].sources == [src(56, 73, "support")]
+
+
 def test_unassigned_line_is_kept_with_no_speaker(conn, book):
     chunk = resolve(conn, book, theo_says(speaker=None, attribution=None), 0, 4)
     assert chunk.rejects == []
@@ -162,12 +199,48 @@ def committed_theo(conn, book):
     ).lastrowid
 
 
+def test_repeated_first_mention_uses_the_earliest_occurrence(conn, book):
+    candidates = theo_says()
+    candidates["characters"][0]["first_mention"] = {"para": 1, "text": "Theo"}  # appears twice
+    chunk = resolve(conn, book, candidates, 0, 4)
+    assert chunk.rejects == []
+    assert chunk.characters[0].first_seen == 1
+    candidates["characters"][0]["first_mention"]["occurrence"] = 2
+    assert resolve(conn, book, candidates, 0, 4).characters[0].first_seen == 3
+
+
 def test_existing_character_is_referenced_by_id(conn, book):
     theo = committed_theo(conn, book)
     candidates = {"utterances": [theo_says(speaker=theo)["utterances"][0]]}
     chunk = resolve(conn, book, candidates, 0, 4)
     assert chunk.rejects == [] and chunk.characters == []
     assert chunk.utterances[0].speaker == theo
+
+
+def test_quoted_numeric_id_is_accepted_unless_it_is_a_declared_key(conn, book):
+    theo = committed_theo(conn, book)
+    candidates = {"utterances": [theo_says(speaker=str(theo))["utterances"][0]]}
+    chunk = resolve(conn, book, candidates, 0, 4)
+    assert chunk.rejects == [] and chunk.utterances[0].speaker == theo
+
+    declared = theo_says(speaker=str(theo))
+    declared["characters"][0]["key"] = str(theo)
+    declared["characters"][0]["name"] = "Mara"
+    declared["characters"][0]["first_mention"] = {"para": 1, "text": "Mara hid"}
+    chunk = resolve(conn, book, declared, 0, 4)
+    assert chunk.utterances[0].speaker == str(theo)  # the key wins
+
+
+def test_invented_key_matching_a_known_name_maps_to_that_character(conn, book):
+    conn.execute("INSERT INTO characters (book_id, display_name, first_seen) VALUES (?,?,1)",
+                 (book, "Mr. Theo Summers"))
+    theo = conn.execute("SELECT id FROM characters").fetchone()[0]
+    for key in ("mr_theo_summers", "MR. THEO SUMMERS", "mr theo summers"):
+        chunk = resolve(conn, book, evidence(character=key), 0, 4)
+        assert [e.character for e in chunk.evidence] == [theo], key
+    for key in ("summers", "mr_summers_jr", "mr_ada"):  # partial or different names stay unknown
+        chunk = resolve(conn, book, evidence(character=key), 0, 4)
+        assert chunk.evidence == [], key
 
 
 def test_redeclared_character_maps_to_the_existing_row(conn, book):
@@ -256,6 +329,41 @@ def test_reported_claim_keeps_its_source_speaker(conn, book):
     chunk = resolve(conn, book, candidates, 0, 4)
     assert chunk.rejects == []
     assert chunk.evidence[0].reported_by == "mara"
+
+
+def test_shared_claim_becomes_one_row_per_character(conn, book):
+    candidates = fixture_candidates()
+    candidates["evidence"] = [{
+        "characters": ["theo", "mara", "theo"], "claim": "Theo returned.",
+        "basis": "observed", "reported_by": None,
+        "support": [{"para": 1, "text": "Theo returned"}]}]
+    chunk = resolve(conn, book, candidates, 0, 4)
+    assert chunk.rejects == []
+    assert [e.character for e in chunk.evidence] == ["theo", "mara"]
+    assert chunk.evidence[0].sources == chunk.evidence[1].sources
+    assert chunk.evidence[0].sources is not chunk.evidence[1].sources
+
+
+def test_bad_name_in_a_shared_claim_drops_only_that_character(conn, book):
+    candidates = fixture_candidates()
+    candidates["evidence"] = [{
+        "characters": ["theo", "ghost"], "claim": "Theo returned.", "basis": "observed",
+        "support": [{"para": 1, "text": "Theo returned"}]}]
+    chunk = resolve(conn, book, candidates, 0, 4)
+    assert [e.character for e in chunk.evidence] == ["theo"]
+    assert reasons(chunk) == [("evidence", 0)]
+    assert "ghost" in chunk.rejects[0].reason
+
+
+@pytest.mark.parametrize("characters", [[], "theo", ["ghost"], [None]])
+def test_shared_claim_with_no_valid_character_is_rejected(conn, book, characters):
+    candidates = fixture_candidates()
+    candidates["evidence"] = [{
+        "characters": characters, "claim": "Theo returned.", "basis": "observed",
+        "support": [{"para": 1, "text": "Theo returned"}]}]
+    chunk = resolve(conn, book, candidates, 0, 4)
+    assert chunk.evidence == []
+    assert reasons(chunk) == [("evidence", 0)]
 
 
 @pytest.mark.parametrize("changes", [

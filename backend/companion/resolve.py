@@ -21,7 +21,8 @@ Candidate format for one chunk covering sentences ``start < s <= through``::
       ],
       "evidence": [
         {"character": "theo", "claim": "Theo was shown the letter.",
-         "basis": "observed", "reported_by": null, "support": [SPAN, ...]}
+         "basis": "observed", "reported_by": null, "support": [SPAN, ...]},
+        {"characters": ["bobby", "harry"], ...}  # shared claim: one row each
       ]
     }
 
@@ -37,6 +38,7 @@ the rest of the chunk still resolves.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Mapping, Sequence, Union
 
@@ -125,6 +127,22 @@ def _find_all(haystack: str, needle: str) -> list[int]:
     return hits
 
 
+def _closest(haystack: str, needle: str, anchors: Sequence[dict]) -> tuple[int, int]:
+    """The copy of ``needle`` nearest to any anchor range in the same text."""
+    if not needle:
+        raise Rejected("span text is empty")
+    hits = _find_all(haystack, needle) or _find_all(fold(haystack), fold(needle))
+    if not hits:
+        raise Rejected(f"text not found in the paragraph: {needle[:60]!r}")
+
+    def gap(lo: int) -> int:
+        hi = lo + len(needle)
+        return min(max(a["lo"] - hi, lo - a["hi"], 0) for a in anchors)
+
+    lo = min(hits, key=lambda h: (gap(h), h))
+    return lo, lo + len(needle)
+
+
 def locate(haystack: str, needle: str, occurrence: int | None = None) -> tuple[int, int]:
     """Find ``needle`` in ``haystack`` and return its ``[lo, hi)`` code-point range.
 
@@ -162,6 +180,11 @@ def _name_key(name: str) -> str:
     return " ".join(fold(name).casefold().split())
 
 
+def _loose_key(name: str) -> str:
+    """Name with case, punctuation and underscores ignored: 'mr_summers' ~ 'Mr. Summers'."""
+    return " ".join(re.sub(r"[^\w\s]|_", " ", fold(name).casefold()).split())
+
+
 def _text(item: Mapping, name: str) -> str:
     value = item.get(name)
     if not isinstance(value, str) or not value.strip():
@@ -183,12 +206,12 @@ class _Resolver:
         self.keys: dict[str, Ref] = {}
         self.out = ResolvedChunk(start, through)
 
-    def run(self, kind: str, items: list, handler) -> None:
+    def run(self, kind: str, items: list, handler, with_index: bool = False) -> None:
         for index, item in enumerate(items):
             try:
                 if not isinstance(item, dict):
                     raise Rejected("record must be an object")
-                handler(item)
+                handler(item, index) if with_index else handler(item)
             except Rejected as exc:
                 self.out.rejects.append(Reject(kind, index, str(exc)))
 
@@ -201,15 +224,31 @@ class _Resolver:
             return None
         if isinstance(value, bool) or not isinstance(value, (int, str)):
             raise Rejected(f"{name} must be a character id, a key, or null")
+        if isinstance(value, str) and value not in self.keys and value.strip().isdigit():
+            value = int(value)  # some models quote numeric ids: "4"
         if isinstance(value, int):
             if value not in self.known_ids:
                 raise Rejected(f"{name}: no character with id {value} in this book")
             return value
         if value not in self.keys:
+            # Models sometimes invent a key for a known character ("mr_summers"
+            # for "id 4: Mr. Summers"). Accept it only if it matches one name exactly.
+            loose = _loose_key(value)
+            matches = {ref for known, ref in self.names.items() if _loose_key(known) == loose}
+            if len(matches) == 1:
+                return matches.pop()
             raise Rejected(f"{name}: unknown character key {value!r}")
         return self.keys[value]
 
-    def span(self, item, role: str, unquote: bool = False) -> tuple[dict, int]:
+    def span(self, item, role: str, unquote: bool = False,
+             default_occurrence: int | None = None,
+             near: Sequence[dict] = ()) -> tuple[dict, int]:
+        """Locate one span. ``near``: sources this span should sit beside.
+
+        When the words repeat in the paragraph and the model gave no
+        ``occurrence``, the copy closest to a ``near`` source in the same
+        paragraph is used (a speech tag sits next to its quote).
+        """
         if not isinstance(item, dict):
             raise Rejected("span must be an object with para and text")
         para = item.get("para")
@@ -222,14 +261,29 @@ class _Resolver:
         if not isinstance(text, str):
             raise Rejected("span text must be a string")
         needle = _unquote(text) if unquote else text.strip()
-        lo, hi = locate(passage.text, needle, item.get("occurrence"))
+        occurrence = item.get("occurrence", default_occurrence)
+        anchors = [s for s in near if s["passage_id"] == passage.id]
+
+        def find(words: str) -> tuple[int, int]:
+            if occurrence is None and anchors:
+                return _closest(passage.text, words, anchors)
+            return locate(passage.text, words, occurrence)
+
+        try:
+            lo, hi = find(needle)
+        except Rejected:
+            # Models sometimes add quotation marks the source does not have there.
+            bare = _unquote(needle)
+            if not bare or bare == needle:
+                raise
+            lo, hi = find(bare)
         sentence = passage.sentence_at(hi)
         if sentence > self.through:
             raise Rejected(f"cites sentence {sentence}, past the chunk end {self.through}")
         return {"passage_id": passage.id, "lo": lo, "hi": hi, "role": role}, sentence
 
     def spans(self, items, role: str, name: str, required: bool = True,
-              unquote: bool = False) -> tuple[list, int]:
+              unquote: bool = False, near: Sequence[dict] = ()) -> tuple[list, int]:
         if items is None:
             items = []
         if not isinstance(items, list):
@@ -238,7 +292,7 @@ class _Resolver:
             raise Rejected(f"{name} needs at least one span")
         sources, latest = [], 0
         for item in items:
-            source, sentence = self.span(item, role, unquote)
+            source, sentence = self.span(item, role, unquote, near=near)
             sources.append(source)
             latest = max(latest, sentence)
         return sources, latest
@@ -262,7 +316,8 @@ class _Resolver:
         if existing is not None:  # already known: point the key at it, add no row
             self.keys[key] = existing
             return
-        _, first_seen = self.span(item.get("first_mention"), "support")
+        # A name usually repeats in its paragraph; the first mention is the earliest.
+        _, first_seen = self.span(item.get("first_mention"), "support", default_occurrence=1)
         self.out.characters.append(NewCharacter(key, name, first_seen))
         self.keys[key] = key
         self.names[_name_key(name)] = key
@@ -286,22 +341,44 @@ class _Resolver:
         addressee = self.ref(item.get("addressee"), "addressee")
         quotes, latest_quote = self.spans(item.get("quotes"), "quote", "quotes", unquote=True)
         tags, latest_tag = self.spans(
-            item.get("attribution"), "attribution", "attribution", required=False
+            item.get("attribution"), "attribution", "attribution", required=False,
+            near=quotes,
         )
         available = self.available(max(latest_quote, latest_tag))
         self.out.utterances.append(UtteranceRow(speaker, addressee, available, quotes + tags))
 
-    def evidence(self, item: dict) -> None:
-        character = self.ref(item.get("character"), "character", required=True)
+    def evidence(self, item: dict, index: int) -> None:
+        """One row per named character; a bad name drops only that character."""
+        if "characters" in item:
+            refs = item["characters"]
+            if not isinstance(refs, list) or not refs:
+                raise Rejected("characters must be a non-empty list")
+        else:
+            refs = [item.get("character")]
         claim = _text(item, "claim")
         basis = item.get("basis")
         if basis not in BASES:
             raise Rejected(f"basis must be one of {', '.join(BASES)}")
         reported_by = self.ref(item.get("reported_by"), "reported_by")
         sources, latest = self.spans(item.get("support"), "support", "support")
-        self.out.evidence.append(EvidenceRow(
-            character, claim, basis, reported_by, self.available(latest), sources
-        ))
+        available = self.available(latest)
+
+        characters, errors = [], []
+        for value in refs:
+            try:
+                character = self.ref(value, "character", required=True)
+            except Rejected as exc:
+                errors.append(str(exc))
+                continue
+            if character not in characters:
+                characters.append(character)
+        if not characters:
+            raise Rejected("; ".join(errors))
+        for error in errors:
+            self.out.rejects.append(Reject("evidence", index, error))
+        for character in characters:
+            self.out.evidence.append(EvidenceRow(
+                character, claim, basis, reported_by, available, list(sources)))
 
 
 def resolve_chunk(
@@ -339,5 +416,5 @@ def resolve_chunk(
     resolver.run("characters", lists["characters"], resolver.character)
     resolver.run("aliases", lists["aliases"], resolver.alias)
     resolver.run("utterances", lists["utterances"], resolver.utterance)
-    resolver.run("evidence", lists["evidence"], resolver.evidence)
+    resolver.run("evidence", lists["evidence"], resolver.evidence, with_index=True)
     return resolver.out
