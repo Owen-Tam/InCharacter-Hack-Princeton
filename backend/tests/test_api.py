@@ -132,6 +132,44 @@ def test_upload_creates_the_book_and_starts_extraction(setup):
     assert again.json()["id"] == book["id"]
 
 
+def test_unfinished_uploads_resume_when_the_server_starts(setup):
+    path = setup["tmp"] / "companion.db"
+    conn = db.connect(path)
+    pending = db.create_book(conn, "Half Done", "abc123", "v1")
+    db.create_book(conn, "Not Uploaded", "no-file-hash", "v1")  # imported from the CLI
+    conn.close()
+    config.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    (config.UPLOAD_DIR / "abc123.epub").write_bytes(b"PK")
+
+    started = []
+    api.create_app(path, chat_llm_factory=FakeLLM,
+                   import_runner=lambda epub, book_id, db_path: started.append((book_id, epub.name)))
+    assert started == [(pending, "abc123.epub")]  # the ready fixture book is left alone
+
+    started.clear()
+    api.create_app(path, chat_llm_factory=FakeLLM, resume_imports=False,
+                   import_runner=lambda *args: started.append(args))
+    assert started == []
+
+
+def test_a_book_already_importing_is_not_started_twice(monkeypatch, tmp_path):
+    threads = []
+
+    class FakeThread:
+        def __init__(self, target, name, daemon):
+            threads.append(name)
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(api.threading, "Thread", FakeThread)
+    api._running.discard(77)
+    api.default_import_runner(tmp_path / "b.epub", 77, tmp_path / "c.db")
+    api.default_import_runner(tmp_path / "b.epub", 77, tmp_path / "c.db")
+    assert threads == ["import-book-77"]
+    api._running.discard(77)
+
+
 def test_upload_rejects_non_epub(setup):
     response = setup["client"].post("/books", files={"file": ("x.epub", b"not a zip")})
     assert response.status_code == 400

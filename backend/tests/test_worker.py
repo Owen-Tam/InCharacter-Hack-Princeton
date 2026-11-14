@@ -344,6 +344,52 @@ def test_other_errors_are_not_resumed():
         run_with_resume(broken, resumes=3, wait=0, sleep=lambda s: None)
 
 
+def test_extract_book_keeps_awake_imports_and_repairs(conn, epub_path, tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    from companion import repair, worker
+    from companion.repair import RepairSummary
+
+    states = []
+
+    @contextmanager
+    def fake_awake():
+        states.append("awake")
+        yield True
+        states.append("asleep-allowed")
+
+    repaired_with = []
+
+    def fake_repair(conn_, book_id, log_path, dry_run=False):
+        repaired_with.append((book_id, log_path))
+        return RepairSummary(evidence_added=2, utterances_added=1)
+
+    monkeypatch.setattr(worker, "keep_awake", fake_awake)
+    monkeypatch.setattr(repair, "recover_rejects", fake_repair)
+    log = tmp_path / "log.jsonl"
+    notes = []
+    summary = worker.extract_book(conn, epub_path, llm=fixture_llm(), log_path=log,
+                                  say=notes.append)
+    assert summary.status == "ready"
+    assert states == ["awake", "asleep-allowed"]
+    assert repaired_with == [(summary.book_id, log)]
+    assert summary.added["evidence"] == 3 + 2 and summary.added["utterances"] == 1 + 1
+    assert notes[0].startswith("Keeping the computer awake")
+    assert "Recovered 2 claims and 1 lines" in notes[-1]
+
+
+def test_extract_book_can_skip_staying_awake_and_needs_no_log(conn, epub_path, monkeypatch):
+    from companion import worker
+
+    def must_not_run():
+        raise AssertionError("keep_awake should not be used")
+
+    monkeypatch.setattr(worker, "keep_awake", must_not_run)
+    summary = worker.extract_book(conn, epub_path, llm=fixture_llm(), stay_awake=False,
+                                  say=lambda m: None)
+    assert summary.status == "ready"
+
+
 def test_cli_requires_a_key(monkeypatch, tmp_path, epub_path):
     from companion import config, llm as llm_module
     monkeypatch.setattr(llm_module.config, "load_env", lambda: None)

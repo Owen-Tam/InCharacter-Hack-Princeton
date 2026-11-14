@@ -45,25 +45,52 @@ class ChatRequest(BaseModel):
 
 ImportRunner = Callable[[Path, int, Path], None]
 
+_running: set[int] = set()
+_running_lock = threading.Lock()
+
 
 def default_import_runner(epub_path: Path, book_id: int, db_path: Path) -> None:
-    """Extract in a background thread with its own connection and model client."""
+    """Extract in a background thread with its own connection and model client,
+    through the same ``extract_book`` path as the command line. One import per
+    book at a time: a second upload of a book that is importing does nothing."""
     from .llm import AdaptionLLM
-    from .worker import run_import, run_with_resume
+    from .worker import extract_book
+
+    with _running_lock:
+        if book_id in _running:
+            return
+        _running.add(book_id)
 
     def job() -> None:
         conn = db.connect(db_path)
         try:
-            llm = AdaptionLLM()
-            run_with_resume(
-                lambda size, limit: run_import(conn, epub_path, llm=llm,
-                                               target_chars=size, max_chunks=limit,
-                                               log_path=f"{db_path}.extract_log.jsonl"),
-                resumes=5, wait=60)
+            extract_book(conn, epub_path, llm=AdaptionLLM(),
+                         log_path=Path(f"{db_path}.extract_log.jsonl"), resume_wait=60,
+                         say=lambda message: print(f"[import book {book_id}] {message}"))
+        except Exception as exc:  # the book stays 'failed' and resumes next time
+            print(f"[import book {book_id}] stopped: {exc}")
         finally:
             conn.close()
+            with _running_lock:
+                _running.discard(book_id)
 
     threading.Thread(target=job, name=f"import-book-{book_id}", daemon=True).start()
+
+
+def resume_unfinished_imports(db_path: Path, runner: ImportRunner) -> list[int]:
+    """Restart extraction for uploaded books left unfinished (e.g. the server
+    stopped). Uploads are saved under the hash that identifies the book."""
+    conn = db.connect(db_path)
+    try:
+        resumed = []
+        for row in conn.execute("SELECT id, epub_hash FROM books WHERE status != 'ready'"):
+            path = config.UPLOAD_DIR / f"{row['epub_hash']}.epub"
+            if path.exists():
+                runner(path, row["id"], db_path)
+                resumed.append(row["id"])
+        return resumed
+    finally:
+        conn.close()
 
 
 def _total_sentences(conn: sqlite3.Connection, book_id: int) -> int:
@@ -86,6 +113,7 @@ def create_app(
     db_path: Path | str | None = None,
     chat_llm_factory: Callable[[], LLM] | None = None,
     import_runner: ImportRunner | None = None,
+    resume_imports: bool = True,
 ) -> FastAPI:
     db_path = Path(db_path or config.DB_PATH)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -93,6 +121,8 @@ def create_app(
     db.init_schema(setup)
     setup.close()
     runner = import_runner or default_import_runner
+    if resume_imports:
+        resume_unfinished_imports(db_path, runner)
     llm_holder: dict = {}
 
     def get_llm() -> LLM:

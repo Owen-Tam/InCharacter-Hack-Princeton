@@ -17,12 +17,25 @@ python3 -m venv .venv
 # API key: ADAPTION_LAB_KEY=... in the repo-root .env
 
 .venv/bin/uvicorn companion.api:app --port 8000          # API; docs at http://localhost:8000/docs
-caffeinate -dims .venv/bin/python -m companion.worker ../test_epub/great_gatsby.epub   # import a book
+.venv/bin/python -m companion.worker ../test_epub/great_gatsby.epub   # import a book
 .venv/bin/python -m pytest                               # offline tests (-m live for real-model tests)
 ```
 
-Keep the Mac awake and the lid open during imports (`caffeinate`): sleep kills
-the model connections. An import resumes where it stopped if rerun.
+Importing a book, from the command line or by uploading it to `POST /books`,
+always goes through the same steps:
+
+1. **Stays awake.** On macOS it runs `caffeinate` for the whole import. Keep the
+   lid open, though: closing it still sleeps the laptop unless it's plugged in
+   with an external display.
+2. **Resumes after failures.** Each chunk commits together with a checkpoint.
+   After an API failure it waits and carries on (5 times), and rerunning the
+   same command continues from the checkpoint. If the API server restarts, it
+   resumes unfinished uploads by itself.
+3. **Gets past hard passages.** If the model runs out of output tokens on a dense
+   scene, it uses smaller chunks for that passage, then returns to normal size.
+4. **Recovers rejected records.** At the end it re-checks records the resolver
+   rejected, using the model answers saved in the extraction log, and keeps any
+   that now pass. To do this by hand: `python -m companion.repair --book N`.
 
 ### Reading positions
 

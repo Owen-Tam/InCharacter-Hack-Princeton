@@ -11,11 +11,13 @@ import sqlite3
 import sys
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
 from . import config, db
+from .awake import keep_awake
 from .chunker import plan_chunks
 from .commit import CheckpointMismatch, commit_chunk
 from .epub import import_epub
@@ -231,10 +233,61 @@ def run_with_resume(run: Callable[[int, int | None], ImportSummary], *, resumes:
         return summary
 
 
+def extract_book(
+    conn: sqlite3.Connection,
+    epub_path: str | Path,
+    *,
+    llm: LLM,
+    version: str = config.VERSION,
+    target_chars: int = 3500,
+    max_chunks: int | None = None,
+    voice: bool = True,
+    log_path: Path | None = None,
+    resumes: int = 5,
+    resume_wait: float = 120.0,
+    stay_awake: bool = True,
+    say: Callable[[str], None] = print,
+    sleep: Callable[[float], None] = time.sleep,
+) -> ImportSummary:
+    """The one way to extract a book; the CLI and the upload endpoint both use it.
+
+    1. Keeps the computer awake (macOS ``caffeinate``) for the whole run.
+    2. Resumes from the checkpoint after API failures (``resumes`` times).
+    3. Gets past passages that make the model run out of output tokens by using
+       smaller chunks briefly, then returns to ``target_chars``.
+    4. Recovers previously rejected records from the extraction log (no model
+       calls), so resolver improvements reach books imported earlier.
+    Snapshots a crash skipped are caught up by ``run_import`` itself.
+    """
+    from .repair import recover_rejects
+
+    with (keep_awake() if stay_awake else nullcontext(False)) as awake:
+        if awake:
+            say("Keeping the computer awake until the import finishes.")
+        summary = run_with_resume(
+            lambda size, limit: run_import(
+                conn, epub_path, llm=llm, version=version, target_chars=size,
+                max_chunks=limit if limit is not None else max_chunks, voice=voice,
+                log_path=log_path, on_progress=say),
+            resumes=resumes, wait=resume_wait, target_chars=target_chars,
+            say=say, sleep=sleep)
+
+    if log_path is not None and Path(log_path).exists():
+        repaired = recover_rejects(conn, summary.book_id, Path(log_path))
+        summary.added["evidence"] += repaired.evidence_added
+        summary.added["utterances"] += repaired.utterances_added
+        if repaired.evidence_added or repaired.utterances_added:
+            say(f"Recovered {repaired.evidence_added} claims and {repaired.utterances_added}"
+                " lines that had been rejected earlier.")
+    return summary
+
+
 def main(argv: list[str] | None = None) -> int:
     from .llm import AdaptionLLM
 
-    parser = argparse.ArgumentParser(description="Extract characters, dialogue and evidence from an EPUB.")
+    parser = argparse.ArgumentParser(
+        description="Extract characters, dialogue and evidence from an EPUB. Keeps the computer"
+                    " awake, resumes after API failures, and recovers rejected records at the end.")
     parser.add_argument("epub", type=Path)
     parser.add_argument("--db", type=Path, default=config.DB_PATH,
                         help="shared database for all books (default: backend/data/companion.db)")
@@ -252,15 +305,12 @@ def main(argv: list[str] | None = None) -> int:
     conn = db.connect(args.db)
     db.init_schema(conn)
     llm = AdaptionLLM(model=args.model, on_call=print)
-    summary = run_with_resume(
-        lambda size, limit: run_import(
-            conn, args.epub, llm=llm,
-            version=args.version or f"{config.PROMPT_VERSION}/{args.model}",
-            target_chars=size, max_chunks=limit if limit is not None else args.max_chunks,
-            voice=not args.no_voice,
-            log_path=f"{args.db}.extract_log.jsonl", on_progress=print,
-        ),
-        resumes=args.resumes, wait=args.resume_wait, target_chars=args.target_chars,
+    summary = extract_book(
+        conn, args.epub, llm=llm,
+        version=args.version or f"{config.PROMPT_VERSION}/{args.model}",
+        target_chars=args.target_chars, max_chunks=args.max_chunks, voice=not args.no_voice,
+        log_path=Path(f"{args.db}.extract_log.jsonl"),
+        resumes=args.resumes, resume_wait=args.resume_wait,
     )
     tokens_in, tokens_out, credits = _usage(llm)
     print(f"book {summary.book_id} {summary.title!r}: {summary.status},"
