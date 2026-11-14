@@ -38,7 +38,17 @@ PROMPTS_DIR = Path(__file__).with_name("prompts")
 
 # The one database the import worker and FastAPI share. Every table is scoped by
 # book_id, so all books (and re-imports under new versions) live in this file.
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "companion.db"
+# COMPANION_DB overrides it (tests, or a copy for experiments).
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DB_PATH = Path(os.environ.get("COMPANION_DB", DATA_DIR / "companion.db"))
+UPLOAD_DIR = DATA_DIR / "uploads"
+
+# Replies are written by Qwen, as the brief specifies.
+CHAT_MODEL = "qwen3.5-397b"
+CHAT_EFFORT: str | None = "low"
+CHAT_TEMPERATURE = 0.7
+# Includes reasoning tokens; Qwen used over 4000 on a simple question.
+CHAT_MAX_TOKENS = 16000
 
 
 def parse_env(text: str) -> dict[str, str]:

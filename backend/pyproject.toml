@@ -2,7 +2,8 @@
 name = "fiction-companion-backend"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["ebooklib>=0.21", "beautifulsoup4>=4.12", "httpx>=0.27"]
+dependencies = ["ebooklib>=0.21", "beautifulsoup4>=4.12", "httpx>=0.27",
+                "fastapi>=0.115", "uvicorn[standard]>=0.30", "python-multipart>=0.0.9"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
