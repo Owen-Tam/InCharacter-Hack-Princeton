@@ -190,22 +190,35 @@ def run_import(
     return summary
 
 
-def run_with_resume(run: Callable[[], ImportSummary], *, resumes: int, wait: float,
+def run_with_resume(run: Callable[[int], ImportSummary], *, resumes: int, wait: float,
+                    target_chars: int = 3500, min_chars: int = 800,
                     say: Callable[[str], None] = print,
                     sleep: Callable[[float], None] = time.sleep) -> ImportSummary:
-    """Call ``run`` again after an API failure; each call resumes at the checkpoint."""
+    """Call ``run(target_chars)`` again after an API failure; each call resumes at
+    the checkpoint.
+
+    A call that runs out of output tokens (the model can loop on a dense scene)
+    would fail the same way on the same chunk, so the next attempt uses chunks
+    half the size instead of waiting. That does not count against ``resumes``.
+    """
     from .llm import LLMError
 
-    for attempt in range(resumes + 1):
+    failures = 0
+    while True:
         try:
-            return run()
+            return run(target_chars)
         except LLMError as exc:
-            if attempt == resumes:
+            if "max_output_tokens" in str(exc) and target_chars > min_chars:
+                target_chars = max(min_chars, target_chars // 2)
+                say(f"Output limit hit; resuming with smaller chunks ({target_chars} characters)."
+                    " Committed chunks are kept.")
+                continue
+            failures += 1
+            if failures > resumes:
                 raise
             say(f"API failure: {exc}. Resuming in {wait:.0f}s"
-                f" ({attempt + 1}/{resumes}); committed chunks are kept.")
+                f" ({failures}/{resumes}); committed chunks are kept.")
             sleep(wait)
-    raise AssertionError("unreachable")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -230,14 +243,14 @@ def main(argv: list[str] | None = None) -> int:
     db.init_schema(conn)
     llm = AdaptionLLM(model=args.model, on_call=print)
     summary = run_with_resume(
-        lambda: run_import(
+        lambda target_chars: run_import(
             conn, args.epub, llm=llm,
             version=args.version or f"{config.PROMPT_VERSION}/{args.model}",
-            target_chars=args.target_chars, max_chunks=args.max_chunks,
+            target_chars=target_chars, max_chunks=args.max_chunks,
             voice=not args.no_voice,
             log_path=f"{args.db}.extract_log.jsonl", on_progress=print,
         ),
-        resumes=args.resumes, wait=args.resume_wait,
+        resumes=args.resumes, wait=args.resume_wait, target_chars=args.target_chars,
     )
     tokens_in, tokens_out, credits = _usage(llm)
     print(f"book {summary.book_id} {summary.title!r}: {summary.status},"

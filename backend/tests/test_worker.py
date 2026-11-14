@@ -257,13 +257,13 @@ def test_run_with_resume_retries_api_failures_and_resumes(conn, epub_path):
     flaky = Flaky(fixture_llm().replies)
     notes, waits = [], []
     summary = run_with_resume(
-        lambda: run_import(conn, epub_path, llm=flaky, target_chars=60, prefix_chars=0),
-        resumes=2, wait=7, say=notes.append, sleep=waits.append)
+        lambda size: run_import(conn, epub_path, llm=flaky, target_chars=size, prefix_chars=0),
+        resumes=2, wait=7, target_chars=60, say=notes.append, sleep=waits.append)
     assert summary.status == "ready"
     assert waits == [7] and "Resuming in 7s (1/2)" in notes[0]
     assert counts(conn)["evidence"] == 3
 
-    def always_fails():
+    def always_fails(size):
         raise LLMError("down")
 
     with pytest.raises(LLMError):
@@ -271,10 +271,39 @@ def test_run_with_resume_retries_api_failures_and_resumes(conn, epub_path):
     assert waits == [7, 1, 1]
 
 
+def test_output_limit_halves_the_chunk_size_without_waiting():
+    from companion.llm import LLMError
+    from companion.worker import run_with_resume
+
+    sizes, notes, waits = [], [], []
+
+    def run(size):
+        sizes.append(size)
+        if size > 1000:
+            raise LLMError("response incomplete: max_output_tokens")
+        return "done"
+
+    assert run_with_resume(run, resumes=0, wait=9, target_chars=3500,
+                           say=notes.append, sleep=waits.append) == "done"
+    assert sizes == [3500, 1750, 875]
+    assert waits == []  # no waiting, and no resume attempts used up
+    assert "smaller chunks (1750 characters)" in notes[0]
+
+    def always_too_long(size):
+        sizes.append(size)
+        raise LLMError("response incomplete: max_output_tokens")
+
+    sizes.clear()
+    with pytest.raises(LLMError):
+        run_with_resume(always_too_long, resumes=1, wait=0, target_chars=3500, min_chars=800,
+                        say=notes.append, sleep=waits.append)
+    assert sizes == [3500, 1750, 875, 800, 800]  # shrink to the floor, then normal retries
+
+
 def test_other_errors_are_not_resumed():
     from companion.worker import run_with_resume
 
-    def broken():
+    def broken(size):
         raise ValueError("bug")
 
     with pytest.raises(ValueError):

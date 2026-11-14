@@ -56,8 +56,9 @@ def default_import_runner(epub_path: Path, book_id: int, db_path: Path) -> None:
         try:
             llm = AdaptionLLM()
             run_with_resume(
-                lambda: run_import(conn, epub_path, llm=llm,
-                                   log_path=f"{db_path}.extract_log.jsonl"),
+                lambda target_chars: run_import(conn, epub_path, llm=llm,
+                                                target_chars=target_chars,
+                                                log_path=f"{db_path}.extract_log.jsonl"),
                 resumes=5, wait=60)
         finally:
             conn.close()
