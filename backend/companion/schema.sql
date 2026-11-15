@@ -4,6 +4,7 @@
 CREATE TABLE IF NOT EXISTS books (
   id INTEGER PRIMARY KEY,
   title text NOT NULL,
+  author text,  -- from the EPUB's dc:creator; NULL when it names none
   epub_hash text NOT NULL,
   version text NOT NULL,
   status text NOT NULL CHECK (status IN ('pending','indexing','ready','failed')),

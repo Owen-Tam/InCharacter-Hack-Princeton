@@ -307,6 +307,11 @@ export function splitTitle(raw: string): { title: string; author: string | null 
   return { title: raw.replace(/^[a-z]/, (c) => c.toUpperCase()), author: null }
 }
 
+/** The book's author: the stored one, else one packed into the title. */
+export function authorOf(book: { title: string; author?: string | null }): string | null {
+  return book.author || splitTitle(book.title).author
+}
+
 export function toRoman(n: number): string {
   const table: [number, string][] = [[1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']]
   let out = ''

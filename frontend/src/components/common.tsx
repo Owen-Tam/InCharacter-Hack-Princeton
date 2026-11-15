@@ -37,14 +37,14 @@ export function coverColor(title: string): string {
   return `oklch(0.40 0.07 ${HUES[h % HUES.length]})`
 }
 
-export function Cover({ title, large }: { title: string; large?: boolean }) {
+export function Cover({ title, author, large }: { title: string; author?: string | null; large?: boolean }) {
   const t = splitTitle(title)
   return (
     <div className={`cover${large ? ' large' : ''}`} style={{ background: coverColor(title) }} aria-hidden>
       <span className="t">{t.title}</span>
       <div className="foot">
         <div className="rule" />
-        <span className="a">{t.author ?? ' '}</span>
+        <span className="a">{author || t.author || ' '}</span>
       </div>
     </div>
   )

@@ -37,7 +37,7 @@ def test_health_and_book_list(setup):
     client = setup["client"]
     assert client.get("/health").json() == {"ok": True}
     (book,) = client.get("/books").json()
-    assert book == {"id": setup["book"], "title": "The Missing Letter", "status": "ready",
+    assert book == {"id": setup["book"], "title": "The Missing Letter", "author": None, "status": "ready",
                     "indexed_through": 4, "sentences": 4, "version": "extract-v1"}
     assert client.get(f"/books/{setup['book']}").json()["status"] == "ready"
     assert client.get("/books/999").status_code == 404

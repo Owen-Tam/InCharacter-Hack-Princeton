@@ -4,7 +4,7 @@ import pytest
 
 from companion import db
 from companion.commit import commit_chunk
-from companion.epub import canonical, import_epub, main, paragraphs_from_html, read_epub
+from companion.epub import book_author, canonical, import_epub, main, paragraphs_from_html, read_epub
 from helpers import (FIXTURE_ENDS, FIXTURE_HTML, FIXTURE_TEXT, counts, fixture_candidates,
                      make_epub, resolve)
 
@@ -21,6 +21,17 @@ from helpers import (FIXTURE_ENDS, FIXTURE_HTML, FIXTURE_TEXT, counts, fixture_c
 ])
 def test_canonical(raw, expected):
     assert canonical(raw) == expected
+
+
+@pytest.mark.parametrize("creators,expected", [
+    ([("F. Scott Fitzgerald", {"id": "author_0"})], "F. Scott Fitzgerald"),
+    ([("Anne Frank; Otto Frank; Mirjam Pressler", {})], "Anne Frank"),
+    ([("Unknown", {}), ("Shirley  Jackson", {})], "Shirley Jackson"),
+    ([("Unknown", {})], None),
+    ([], None),
+])
+def test_book_author(creators, expected):
+    assert book_author(creators) == expected
 
 
 # -- paragraphs from one document ---------------------------------------------------

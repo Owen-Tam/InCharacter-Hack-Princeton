@@ -7,6 +7,7 @@ export type BookStatus = 'pending' | 'indexing' | 'ready' | 'failed'
 export interface Book {
   id: number
   title: string
+  author: string | null // from the EPUB; older titles may carry it as "Title--Author" instead
   status: BookStatus
   indexed_through: number
   sentences: number

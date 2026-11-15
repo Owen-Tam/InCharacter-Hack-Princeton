@@ -61,6 +61,7 @@ class ParsedBook:
     title: str
     epub_hash: str
     paragraphs: list[Paragraph]
+    author: str | None = None
 
 
 @dataclass(frozen=True)
@@ -115,6 +116,16 @@ def _is_nav(item) -> bool:
     return isinstance(item, epub.EpubNav) or "nav" in (getattr(item, "properties", None) or [])
 
 
+def book_author(creators: list) -> str | None:
+    """The first named creator: "Anne Frank; Otto Frank" gives "Anne Frank". Placeholders
+    such as "Unknown" count as no author."""
+    for value, _attrs in creators or []:
+        name = canonical(str(value or "")).split(";")[0].strip()
+        if name and name.casefold() not in {"unknown", "anonymous", "n/a"}:
+            return name
+    return None
+
+
 def read_epub(path: str | Path) -> ParsedBook:
     """Paragraphs of every linear spine document, in spine order."""
     path = Path(path)
@@ -125,6 +136,7 @@ def read_epub(path: str | Path) -> ParsedBook:
 
     titles = book.get_metadata("DC", "title")
     title = canonical(titles[0][0]) if titles and titles[0][0] else ""
+    author = book_author(book.get_metadata("DC", "creator"))
 
     paragraphs: list[Paragraph] = []
     for entry in book.spine:
@@ -138,7 +150,7 @@ def read_epub(path: str | Path) -> ParsedBook:
         for para_no, text in enumerate(paragraphs_from_html(item.get_content())):
             paragraphs.append(Paragraph(href, para_no, text))
 
-    return ParsedBook(title or path.stem, hashlib.sha256(data).hexdigest(), paragraphs)
+    return ParsedBook(title or path.stem, hashlib.sha256(data).hexdigest(), paragraphs, author)
 
 
 def import_epub(conn: sqlite3.Connection, path: str | Path, version: str) -> ImportResult:
@@ -147,7 +159,7 @@ def import_epub(conn: sqlite3.Connection, path: str | Path, version: str) -> Imp
     if not parsed.paragraphs:
         raise ValueError(f"{path} has no readable text in its spine")
 
-    book_id = db.create_book(conn, parsed.title, parsed.epub_hash, version)
+    book_id = db.create_book(conn, parsed.title, parsed.epub_hash, version, parsed.author)
     with db.write_tx(conn):
         existing = conn.execute(
             "SELECT count(*) AS n,"

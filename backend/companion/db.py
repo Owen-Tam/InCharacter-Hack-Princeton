@@ -34,6 +34,9 @@ def connect(path: str | Path = ":memory:", *, check_same_thread: bool = True) ->
 
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+    # Databases made before books had an author column get it added (left NULL).
+    if "author" not in {r["name"] for r in conn.execute("PRAGMA table_info(books)")}:
+        conn.execute("ALTER TABLE books ADD COLUMN author text")
 
 
 @contextmanager
@@ -98,7 +101,8 @@ def check_passage(first_sentence: int, sentence_ends: Sequence[int], text: str) 
         )
 
 
-def create_book(conn: sqlite3.Connection, title: str, epub_hash: str, version: str) -> int:
+def create_book(conn: sqlite3.Connection, title: str, epub_hash: str, version: str,
+                author: str | None = None) -> int:
     """Return the id for this (epub_hash, version) import, creating it if needed."""
     with write_tx(conn):
         row = conn.execute(
@@ -107,8 +111,8 @@ def create_book(conn: sqlite3.Connection, title: str, epub_hash: str, version: s
         if row:
             return row["id"]
         cur = conn.execute(
-            "INSERT INTO books (title, epub_hash, version, status) VALUES (?,?,?,'pending')",
-            (title, epub_hash, version),
+            "INSERT INTO books (title, author, epub_hash, version, status) VALUES (?,?,?,?,'pending')",
+            (title, author, epub_hash, version),
         )
         return cur.lastrowid
 

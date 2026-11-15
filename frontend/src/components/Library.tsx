@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, Plus } from 'lucide-react'
 import { api, type Book } from '../api'
-import { splitTitle } from '../book'
+import { authorOf, splitTitle } from '../book'
 import { allReadingStates } from '../store'
 import { Cover } from './common'
 
@@ -154,11 +154,11 @@ export function Library({ books, error, onOpen, onUploaded }: {
             <span className="shelf-label">Continue reading</span>
             <div className="continue">
               <button className="cover-item" style={{ width: 150 }} onClick={() => onOpen(recent.id)} aria-label={`Open ${recent.title}`}>
-                <Cover title={recent.title} large />
+                <Cover title={recent.title} author={recent.author} large />
               </button>
               <div className="continue-info">
                 <button className="continue-title" onClick={() => onOpen(recent.id)}>{splitTitle(recent.title).title}</button>
-                <span className="small muted">{splitTitle(recent.title).author ?? statusLine(recent)}</span>
+                <span className="small muted">{authorOf(recent) ?? statusLine(recent)}</span>
                 <div className="progress-row">
                   <div className="track"><div style={{ width: `${percent(recent, reading[recent.id].position)}%` }} /></div>
                   <span className="tiny muted tnum">{percent(recent, reading[recent.id].position)}%</span>
@@ -180,7 +180,7 @@ export function Library({ books, error, onOpen, onUploaded }: {
             <div className="covers">
               {sorted!.map((b) => (
                 <button key={b.id} className="cover-item" onClick={() => onOpen(b.id)}>
-                  <Cover title={b.title} />
+                  <Cover title={b.title} author={b.author} />
                   <span className="name">{splitTitle(b.title).title}</span>
                   <span className="meta tnum">
                     {reading[b.id] ? `${percent(b, reading[b.id].position)}% read` : b.status === 'ready' ? 'New' : statusLine(b)}

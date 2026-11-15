@@ -16,6 +16,17 @@ def test_schema_can_be_applied_twice(conn, book):
     assert counts(conn)["passages"] == 1
 
 
+def test_init_schema_adds_author_to_an_older_database(tmp_path):
+    conn = db.connect(tmp_path / "old.db")
+    conn.execute("CREATE TABLE books (id INTEGER PRIMARY KEY, title text NOT NULL, epub_hash text NOT NULL,"
+                 " version text NOT NULL, status text NOT NULL, indexed_through integer NOT NULL DEFAULT 0)")
+    conn.execute("INSERT INTO books (title, epub_hash, version, status) VALUES ('Old', 'h', 'v', 'ready')")
+    db.init_schema(conn)
+    assert conn.execute("SELECT author FROM books").fetchone()["author"] is None
+    book_id = db.create_book(conn, "New", "h2", "v", author="Someone")
+    assert conn.execute("SELECT author FROM books WHERE id=?", (book_id,)).fetchone()["author"] == "Someone"
+
+
 def test_file_database_is_shared_between_connections(tmp_path):
     path = tmp_path / "companion.db"
     worker = db.connect(path)

@@ -104,7 +104,7 @@ def _total_sentences(conn: sqlite3.Connection, book_id: int) -> int:
 
 
 def _book_json(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
-    return {"id": row["id"], "title": row["title"], "status": row["status"],
+    return {"id": row["id"], "title": row["title"], "author": row["author"], "status": row["status"],
             "indexed_through": row["indexed_through"],
             "sentences": _total_sentences(conn, row["id"]), "version": row["version"]}
 
