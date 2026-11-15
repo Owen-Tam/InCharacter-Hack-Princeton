@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight, MessageCircle } from 'lucide-react'
 import type { Book } from '../api'
-import { chapterLabel, spreadForPosition, type BookModel, type Page } from '../book'
+import { chapterLabel, pagesLeftInChapter, spreadForPosition, type BookModel, type Page } from '../book'
 import { TopBar } from './common'
 
 function PageView({ page, side, number, book }: { page: Page | null; side: 'left' | 'right'; number: number; book: BookModel }) {
@@ -65,6 +65,8 @@ export function Reader({ book, model, spreadIndex, onSpread, onTalk, onHome }: {
 
   const last = Math.min(spread.firstPage + 1, total)
   const pagesLabel = last > spread.firstPage ? `Pages ${spread.firstPage}–${last} of ${total}` : `Page ${spread.firstPage} of ${total}`
+  const left = pagesLeftInChapter(model, spread)
+  const leftLabel = left === 0 ? 'Last pages of the chapter' : `${left} ${left === 1 ? 'page' : 'pages'} left in the chapter`
   const ahead = spread.position > book.indexed_through
   const learnedPage = model.spreads.find((s) => s.position >= book.indexed_through)?.firstPage ?? 1
 
@@ -110,13 +112,13 @@ export function Reader({ book, model, spreadIndex, onSpread, onTalk, onHome }: {
           <div className="reader-foot-row tnum">
             <span>{pagesLabel}</span>
             {scrub !== null ? (
-              <span className="warn">
-                Let go to open {chapterLabel(model, model.spreads[scrub].position) ?? 'the book'}, page {model.spreads[scrub].firstPage}
+              <span>
+                {[chapterLabel(model, model.spreads[scrub].position), `page ${model.spreads[scrub].firstPage}`].filter(Boolean).join(', ')}
               </span>
             ) : ahead ? (
               <span className="warn">Characters have only learned the story up to page {learnedPage} so far</span>
             ) : (
-              <span>Characters know the story up to the end of this spread</span>
+              <span>{leftLabel}</span>
             )}
           </div>
         </div>

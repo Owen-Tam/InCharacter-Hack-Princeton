@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { BookOpen, ChevronLeft } from 'lucide-react'
-import { api, type Book, type ChatReply, type Character } from '../api'
+import { api, type Book, type ChatReply, type Character, type Citation } from '../api'
 import { chapterLabel, inSentence, shortChapter, spreadForPosition, type BookModel } from '../book'
 import { sourcesLabel, splitSentences } from '../reply'
 import { TopBar } from './common'
@@ -11,40 +11,45 @@ export interface CompareSeed {
   position: number
 }
 
-function momentLabel(model: BookModel, position: number) {
+function momentLabel(model: BookModel, prefix: string, position: number) {
   const spread = spreadForPosition(model, position)
   const chapter = chapterLabel(model, position)
-  return `Bookmark · ${chapter ? `${chapter}, ` : ''}page ${spread.firstPage}`
+  return `${prefix} · ${chapter ? `${chapter}, ` : ''}page ${spread.firstPage}`
 }
 
-function Moment({ label, name, reply, model, later, newSince }: {
+/** What differs between the two bookmarks, shown on the other bookmark's card. */
+interface Diff {
+  title: string
+  empty: string
+  items: Citation[]
+}
+
+function Moment({ label, name, reply, model, other, diff }: {
   label: string
   name: string
   reply: ChatReply
   model: BookModel
-  later?: boolean
-  newSince?: number // show citations that became available after this position
+  other?: boolean // the bookmark being compared, styled to match its timeline knob
+  diff?: Diff
 }) {
-  const fresh = newSince === undefined ? [] : reply.citations.filter((c) => c.available_from > newSince)
+  const where = diff?.items.length ? shortChapter(model, diff.items[0].available_from) : null
   return (
-    <div className={`moment${later ? ' later' : ''}`}>
-      <span className="small" style={{ color: later ? 'var(--color-accent-400)' : 'var(--color-neutral-500)' }}>{label}</span>
-      <span className={`kicker${later ? '' : ' muted'}`}>{name}</span>
+    <div className={`moment${other ? ' later' : ''}`}>
+      <span className="small" style={{ color: other ? 'var(--color-accent-400)' : 'var(--color-neutral-500)' }}>{label}</span>
+      <span className={`kicker${other ? '' : ' muted'}`}>{name}</span>
       <p className="reply">{splitSentences(reply.reply).join('')}</p>
       {sourcesLabel(reply, model) && <span className="tiny muted">{sourcesLabel(reply, model)}</span>}
-      {newSince !== undefined && (
+      {diff && (
         <div className="new-since">
-          {fresh.length ? (
+          {diff.items.length ? (
             <>
-              <span className="small muted">
-                New since the earlier bookmark{shortChapter(model, fresh[0].available_from) ? ` · ${shortChapter(model, fresh[0].available_from)}` : ''}
-              </span>
-              {fresh.map((c) => (
+              <span className="small muted">{diff.title}{where ? ` · ${where}` : ''}</span>
+              {diff.items.map((c) => (
                 <span key={c.evidence_id} className="q" title={c.claim}>{c.sources[0]?.quote || c.claim}</span>
               ))}
             </>
           ) : (
-            <span className="small muted">Nothing they cited is new since the earlier bookmark.</span>
+            <span className="small muted">{diff.empty}</span>
           )}
         </div>
       )}
@@ -86,15 +91,27 @@ export function Compare({ book, model, character, seed, page, onBackToChat, onBa
     }
   }
 
-  const first = { position: seed.position, reply: seed.reply }
-  const [early, late] = result && result.position < first.position ? [result, first] : [first, result]
+  // Each answer keeps its place: the reader's bookmark on the left, the other on the right.
+  const earlier = other < seed.position
+  const otherLabel = momentLabel(model, earlier ? 'Earlier bookmark' : 'Later bookmark', other)
+  const diff: Diff | undefined = !result ? undefined : earlier
+    ? {
+        title: 'Not known yet at this bookmark',
+        empty: 'Everything they cited at your bookmark was already known here.',
+        items: seed.reply.citations.filter((c) => c.available_from > result.position),
+      }
+    : {
+        title: 'New since your bookmark',
+        empty: 'Nothing they cited is new since your bookmark.',
+        items: result.reply.citations.filter((c) => c.available_from > seed.position),
+      }
   const total = model.totalSentences || max
   const pct = (p: number) => `${(p / total) * 100}%`
   const lo = Math.min(seed.position, other)
   const hi = Math.max(seed.position, other)
   const firstCh = model.chapters[0]?.label.replace(/^chapter\s+/i, '')
   const lastCh = model.chapters[model.chapters.length - 1]?.label.replace(/^chapter\s+/i, '')
-  const earlierChapter = early ? chapterLabel(model, early.position) : null
+  const earlierChapter = chapterLabel(model, other)
   const notMetYet = other < character.first_seen
 
   return (
@@ -117,12 +134,12 @@ export function Compare({ book, model, character, seed, page, onBackToChat, onBa
           <span className="q">“{seed.question}”</span>
         </div>
         <div className="compare-grid">
-          {early && <Moment label={momentLabel(model, early.position)} name={character.name} reply={early.reply} model={model} />}
-          {late ? (
-            <Moment label={momentLabel(model, late.position)} name={character.name} reply={late.reply} model={model} later newSince={early.position} />
+          <Moment label={momentLabel(model, 'Your bookmark', seed.position)} name={character.name} reply={seed.reply} model={model} />
+          {result ? (
+            <Moment label={otherLabel} name={character.name} reply={result.reply} model={model} other diff={diff} />
           ) : (
             <div className="moment later">
-              <span className="small" style={{ color: 'var(--color-accent-400)' }}>{momentLabel(model, other)}</span>
+              <span className="small" style={{ color: 'var(--color-accent-400)' }}>{otherLabel}</span>
               <p className="muted" style={{ margin: 0 }}>
                 Move the bookmark on the timeline below, then ask again. {character.name.replace(/^the\s/, 'The ')} will know only what they could know by then.
               </p>
@@ -165,7 +182,7 @@ export function Compare({ book, model, character, seed, page, onBackToChat, onBa
           {result ? (
             <>
               <button className="btn quiet" onClick={() => onContinueAt(result.position, seed.question, result.reply)}>Keep talking at the new bookmark</button>
-              {early && <button className="btn quiet" onClick={() => onReadFrom(early.position)}>Rewind and read from {earlierChapter ?? 'there'}</button>}
+              {earlier && <button className="btn quiet" onClick={() => onReadFrom(result.position)}>Rewind and read from {earlierChapter ?? 'there'}</button>}
             </>
           ) : null}
         </div>

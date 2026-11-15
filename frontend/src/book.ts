@@ -50,40 +50,93 @@ export function lastSentence(p: Passage): number {
   return p.first_sentence + p.sentence_ends.length - 1
 }
 
-/** How much text a page holds, estimated from the page's size and the body font. */
+/** How much text a page holds, measured in the page's font. */
 export interface PageMetrics {
-  charsPerLine: number
+  charsPerLine: number // a rough figure, only for noticing when the layout changes
   lines: number // lines of text per page
   gapLines: number // a paragraph break, in lines
+  textWidth: number // px available for a line of text
+  indent: number // px of a paragraph's first-line indent
+  measure: (text: string) => number // px width of a run of text in the body font
 }
 
-/** Mirror of the .page / .page-body CSS: 16px Lora at 1.7, 14px paragraph gaps. */
+/** Mirror of the .page / .page-body CSS: 16px Lora at 1.7, 4px paragraph gaps, 1.4em indents. */
 export function pageMetrics(viewportWidth: number, viewportHeight: number): PageMetrics {
   const narrow = viewportWidth <= 760
   const pageWidth = narrow ? viewportWidth - 112 : 470
-  const pageHeight = Math.max(420, Math.min(600, viewportHeight - 200))
+  const pageHeight = Math.max(420, Math.min(760, viewportHeight - 200))
   const textWidth = pageWidth - (narrow ? 44 : 88)
   const textHeight = pageHeight - (narrow ? 48 : 88) - 28 // padding, then the page number
   const lineHeight = 16 * 1.7
-  let charWidth = 7.9 // Lora 16px average, used until the font has loaded
+  let measure = estimate
   try {
     const ctx = document.createElement('canvas').getContext('2d')
     if (ctx) {
       ctx.font = '16px Lora'
-      const sample = 'He looked at me sideways—and I knew why Jordan Baker had believed he was lying, or so it seemed.'
-      charWidth = ctx.measureText(sample).width / sample.length
+      const cache = new Map<string, number>()
+      measure = (text) => {
+        let w = cache.get(text)
+        if (w === undefined) { w = ctx.measureText(text).width; cache.set(text, w) }
+        return w
+      }
     }
   } catch {
     /* keep the estimate */
   }
+  const sample = 'He looked at me sideways—and I knew why Jordan Baker had believed he was lying, or so it seemed.'
   return {
-    charsPerLine: Math.max(20, Math.floor((textWidth / charWidth) * 0.97)),
+    charsPerLine: Math.max(20, Math.floor(textWidth / (measure(sample) / sample.length))),
     lines: Math.max(6, Math.floor(textHeight / lineHeight)),
-    gapLines: 14 / lineHeight,
+    gapLines: 4 / lineHeight,
+    // A hair under the real width, so rounding never makes the browser wrap a line we didn't.
+    textWidth: textWidth - 1,
+    indent: 16 * 1.4,
+    measure,
   }
 }
 
-const DEFAULT_METRICS: PageMetrics = { charsPerLine: 46, lines: 17, gapLines: 0.5 }
+const estimate = (text: string) => codepoints(text).length * 7.9 // Lora 16px average
+const DEFAULT_METRICS: PageMetrics = { charsPerLine: 46, lines: 17, gapLines: 0.15, textWidth: 381, indent: 22.4, measure: estimate }
+
+/** A piece of text between two places a line may break: after a space or a dash. */
+interface Segment { lo: number; hi: number; width: number; spaceAfter: boolean }
+
+function segments(chars: string[], measure: (s: string) => number): Segment[] {
+  const out: Segment[] = []
+  let i = 0
+  while (i < chars.length) {
+    while (i < chars.length && /\s/.test(chars[i])) i++
+    if (i >= chars.length) break
+    let j = i
+    while (j < chars.length && !/\s/.test(chars[j])) {
+      j++
+      if (/[—–-]/.test(chars[j - 1]) && j < chars.length && !/\s/.test(chars[j])) break
+    }
+    out.push({ lo: i, hi: j, width: measure(chars.slice(i, j).join('')), spaceAfter: j < chars.length && /\s/.test(chars[j]) })
+    i = j
+  }
+  return out
+}
+
+/** Greedy line filling from segment ``from``, as the browser sets justified text:
+ * the index just past the last segment of each line. */
+function lineBreaks(segs: Segment[], from: number, firstWidth: number, width: number, space: number): number[] {
+  const breaks: number[] = []
+  let line = -1 // width so far on this line; -1 when it is empty
+  let max = firstWidth
+  for (let k = from; k < segs.length; k++) {
+    const join = k > from && segs[k - 1].spaceAfter ? space : 0
+    if (line >= 0 && line + join + segs[k].width > max) {
+      breaks.push(k)
+      max = width
+      line = segs[k].width
+    } else {
+      line = line < 0 ? segs[k].width : line + join + segs[k].width
+    }
+  }
+  if (line >= 0) breaks.push(segs.length)
+  return breaks
+}
 
 export function paginate(passages: Passage[], metrics: PageMetrics = DEFAULT_METRICS): Page[] {
   const pages: Page[] = []
@@ -94,9 +147,7 @@ export function paginate(passages: Passage[], metrics: PageMetrics = DEFAULT_MET
     current = []
     used = 0
   }
-  const cpl = metrics.charsPerLine
-  // Lines a run of text takes; the first line of a paragraph is indented.
-  const linesFor = (chars: number) => Math.ceil((chars + 3) / cpl)
+  const space = metrics.measure(' ')
   const headings = new Set(findChapters(passages).map((c) => c.paragraphPos))
   for (const passage of passages) {
     const chars = codepoints(passage.text)
@@ -106,33 +157,28 @@ export function paginate(passages: Passage[], metrics: PageMetrics = DEFAULT_MET
       // unless the page is nearly empty.
       if (used > metrics.lines / 3) flush()
       current.push({ passage, lo: 0, hi: chars.length, text: passage.text.trim(), continued: false, lastSentence: lastSentence(passage) })
-      used += (current.length > 1 ? metrics.gapLines : 0) + 3
+      used += (current.length > 1 ? metrics.gapLines : 0) + 2
       continue
     }
-    let lo = 0
-    while (lo < chars.length) {
+    const segs = segments(chars, metrics.measure)
+    let from = 0 // first segment not yet placed
+    while (from < segs.length) {
       const gap = current.length ? metrics.gapLines : 0
-      const avail = Math.floor(metrics.lines - used - gap)
+      const avail = Math.floor(metrics.lines - used - gap + 1e-6)
       if (avail < 1) {
         flush()
         continue
       }
-      const capacity = avail * cpl - 3
-      let hi: number
-      if (chars.length - lo <= capacity) {
-        hi = chars.length
-      } else {
-        // Break at the last sentence end that fills most of the room, else at a word,
-        // the way a printed page breaks mid-sentence.
-        const limit = lo + capacity
-        const sentenceEnd = [...ends].reverse().find((e) => e > lo && e <= limit)
-        let wordEnd = -1
-        for (let k = limit; k > lo; k--) if (chars[k] === ' ') { wordEnd = k; break }
-        if (sentenceEnd !== undefined && sentenceEnd - lo >= capacity * 0.8) hi = sentenceEnd
-        else if (wordEnd > lo && (avail >= 2 || used === 0)) hi = wordEnd
-        else if (used > 0) { flush(); continue }
-        else hi = limit
-      }
+      // Only a paragraph's first line is indented; a continuation starts flush.
+      const first = from === 0 ? metrics.textWidth - metrics.indent : metrics.textWidth
+      const breaks = lineBreaks(segs, from, first, metrics.textWidth, space)
+      let take: number
+      if (breaks.length <= avail) take = breaks.length
+      else if (avail >= 2 || used === 0) take = avail // fill the page, breaking mid-paragraph
+      else { flush(); continue } // don't strand a single line at the foot of a page
+      const to = breaks[take - 1]
+      const lo = from === 0 ? 0 : segs[from].lo
+      const hi = to >= segs.length ? chars.length : segs[to - 1].hi
       const done = ends.filter((e) => e <= hi).length
       current.push({
         passage,
@@ -145,10 +191,9 @@ export function paginate(passages: Passage[], metrics: PageMetrics = DEFAULT_MET
         // belongs to the page where it ends.
         lastSentence: passage.first_sentence + done - 1,
       })
-      used += gap + linesFor(hi - lo)
-      lo = hi
-      while (lo < chars.length && chars[lo] === ' ') lo++
-      if (lo < chars.length) flush()
+      used += gap + take
+      from = to
+      if (from < segs.length) flush()
     }
   }
   flush()
@@ -212,6 +257,18 @@ export function chapterLabel(book: BookModel, position: number): string | null {
   const c = chapterAt(book, position)
   if (!c) return null
   return /^chapter/i.test(c.label) ? c.label : `Chapter ${c.label}`
+}
+
+/** Pages of the current chapter after this spread: up to the page where the next
+ * chapter's heading falls (or the end of the book). */
+export function pagesLeftInChapter(book: BookModel, spread: Spread): number {
+  const lastPage = Math.min(spread.firstPage + 1, book.pages.length)
+  const next = book.chapters.find((c) => c.position > spread.position)
+  const nextStart = next
+    ? book.pages.findIndex((p) => p.fragments.some((f) => f.passage.paragraph_pos === next.paragraphPos))
+    : -1
+  const chapterEnd = nextStart >= 0 ? nextStart : book.pages.length // pages 1..chapterEnd belong to it
+  return Math.max(0, chapterEnd - lastPage)
 }
 
 export function shortChapter(book: BookModel, position: number): string | null {

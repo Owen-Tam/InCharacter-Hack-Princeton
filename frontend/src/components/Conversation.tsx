@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { AlertTriangle, Bookmark, BookOpen, Users } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
+import { AlertTriangle, ArrowLeft, Bookmark, BookOpen, Users } from 'lucide-react'
 import { api, type Book, type ChatReply, type Character, type Turn } from '../api'
 import { chapterLabel, inSentence, recentParagraphs, type BookModel } from '../book'
 import { annotate, sourcesLabel } from '../reply'
@@ -82,10 +82,12 @@ export function ConversationScreen({ book, model, position, page, character, con
   onHome: () => void
 }) {
   const [draft, setDraft] = useState('')
-  const [pageOpen, setPageOpen] = useState(false)
+  const [pageOpen, setPageOpen] = useState(true)
   const [source, setSource] = useState<SourceView | null>(null)
   const [others, setOthers] = useState<Character[]>([])
+  const [compact, setCompact] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
+  const convoRef = useRef<HTMLElement>(null)
   const latest = useRef(conversation)
   latest.current = conversation
   const chapter = chapterLabel(model, position)
@@ -102,6 +104,37 @@ export function ConversationScreen({ book, model, position, page, character, con
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: 'smooth' })
   }, [conversation.messages.length, conversation.pending])
+
+  // The heading overlays the messages and folds as they scroll: --p runs 0 → 1 over the
+  // height it gives up, so the blend tracks the scroll exactly. Written straight to the
+  // style (no re-render per scroll event); only the half-way flip goes through state,
+  // to switch which version of the heading takes focus and clicks.
+  const headFull = useRef<HTMLDivElement>(null)
+  const fold = useRef(1) // px of scroll over which the heading folds
+  function onScroll() {
+    const el = scroller.current
+    const convo = convoRef.current
+    if (!el || !convo) return
+    const p = Math.min(1, Math.max(0, el.scrollTop / fold.current))
+    convo.style.setProperty('--p', p.toFixed(3))
+    setCompact(p > 0.5)
+  }
+  useLayoutEffect(() => {
+    const full = headFull.current
+    const convo = convoRef.current
+    if (!full || !convo) return
+    const measure = () => {
+      const height = full.offsetHeight // layout size: unaffected by the fold's transform
+      const compactHeight = parseFloat(getComputedStyle(convo).getPropertyValue('--head-compact')) || 46
+      convo.style.setProperty('--head-full', `${height}px`)
+      fold.current = Math.max(1, height - compactHeight)
+      onScroll()
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(full)
+    return () => observer.disconnect()
+  }, [])
 
   async function ask(question: string) {
     question = question.trim()
@@ -137,19 +170,34 @@ export function ConversationScreen({ book, model, position, page, character, con
     ...others.slice(0, 2).map((o) => `What do you make of ${inSentence(o.name)}?`),
     'What is on your mind right now?',
   ]
-  const paragraphs = recentParagraphs(model, position, pageOpen ? 6 : 2)
+  const paragraphs = pageOpen ? recentParagraphs(model, position, 6) : []
   const sourceMsg = source ? conversation.messages[source.msg] : null
   const activeNote = source && 'note' in source ? source.note : null
+  // A source panel takes the page's place, so the toggle acts on what is on screen:
+  // with a source open, "Show the page" swaps it for the page.
+  const pageShown = pageOpen && !source
+  function togglePage() {
+    if (pageShown) { setPageOpen(false); return }
+    setSource(null)
+    setPageOpen(true)
+  }
+  // Real lines depend only on the bookmark, not the question, so any reply's lines
+  // are the conversation's; use the latest.
+  const lastReplyAt = conversation.messages.map((m) => m.role).lastIndexOf('character')
 
   return (
     <div className="app">
       <TopBar title={book.title} chapter={chapter} onBrand={onHome}>
+        <button className="bar-link" onClick={togglePage} aria-pressed={pageShown}>
+          <BookOpen size={14} strokeWidth={1.6} />
+          <span className="label">{pageShown ? 'Hide the page' : 'Show the page'}</span>
+        </button>
         <button className="bar-link" onClick={onChangeCharacter}>
           <Users size={14} strokeWidth={1.6} />
           <span className="label">Change character</span>
         </button>
-        <button className="bar-link" onClick={onBack}>
-          <BookOpen size={14} strokeWidth={1.6} />
+        <button className="bar-link strong" onClick={onBack}>
+          <ArrowLeft size={14} strokeWidth={1.6} />
           <span className="label">Back to page {page}</span>
         </button>
       </TopBar>
@@ -165,14 +213,8 @@ export function ConversationScreen({ book, model, position, page, character, con
             onClose={() => setSource(null)}
             onReadAt={onReadAt}
           />
-        ) : (
-          <aside className={`side${pageOpen ? ' wide' : ''}`}>
-            <div>
-              <button className="btn" onClick={() => setPageOpen((o) => !o)}>
-                <BookOpen size={14} strokeWidth={1.6} />
-                {pageOpen ? 'Hide the page' : 'Show the page'}
-              </button>
-            </div>
+        ) : pageOpen && (
+          <aside className="side wide">
             <div className="left-off">
               <span className="small muted">Where you left off{chapter ? ` · ${chapter}` : ''}</span>
               <div className="left-off-text">{paragraphs.map((p) => <p key={p.passage.id}>{p.text}</p>)}</div>
@@ -186,12 +228,28 @@ export function ConversationScreen({ book, model, position, page, character, con
             )}
           </aside>
         )}
-        <main className="convo">
+        <main className="convo" ref={convoRef}>
           <div className="convo-head">
-            <span className="kicker">Talk to</span>
-            <span className="name">{name}</span>
+            <div className="head-full" ref={headFull} inert={compact}>
+              <span className="kicker">Talk to</span>
+              <span className="name">{name}</span>
+              {lastReplyAt >= 0 && (
+                <button className="link-quiet voice-link" onClick={() => setSource({ msg: lastReplyAt, voice: true })}>
+                  How {nameInText} speaks
+                </button>
+              )}
+            </div>
+            <div className="head-compact" inert={!compact} aria-hidden={!compact}>
+              <span className="kicker">Talk to</span>
+              <span className="name">{name}</span>
+              {lastReplyAt >= 0 && (
+                <button className="link-quiet voice-link" onClick={() => setSource({ msg: lastReplyAt, voice: true })}>
+                  How {nameInText} speaks
+                </button>
+              )}
+            </div>
           </div>
-          <div className="messages" ref={scroller} aria-live="polite">
+          <div className="messages" ref={scroller} onScroll={onScroll} aria-live="polite">
             {conversation.messages.length === 0 && !conversation.pending && (
               <div className="empty">
                 {capitalize(nameInText)} knows the story only as far as your bookmark{chapter ? `, in ${chapter}` : ''}. Ask anything.
@@ -204,7 +262,7 @@ export function ConversationScreen({ book, model, position, page, character, con
                   <div className="bubble">{m.text}</div>
                 </div>
               ) : (
-                <div key={i} className={`msg-char${source && source.msg !== i ? ' dimmed' : ''}`}>
+                <div key={i} className={`msg-char${source && 'note' in source && source.msg !== i ? ' dimmed' : ''}`}>
                   <span className="kicker">{nameInText}</span>
                   <ReplyText
                     reply={m.reply}
@@ -216,9 +274,6 @@ export function ConversationScreen({ book, model, position, page, character, con
                   <div className="msg-foot" style={{ opacity: m.fresh ? 0 : 1 }}>
                     {sourcesLabel(m.reply, model) && (
                       <button className="link-quiet" onClick={() => setSource({ msg: i, note: 0 })}>{sourcesLabel(m.reply, model)}</button>
-                    )}
-                    {m.reply.voice_lines.length > 0 && (
-                      <button className="link-quiet" onClick={() => setSource({ msg: i, voice: true })}>Real lines</button>
                     )}
                     <button className="link-accent" onClick={() => onCompare(m.question, m.reply)}>
                       <Bookmark size={12} strokeWidth={1.6} />
