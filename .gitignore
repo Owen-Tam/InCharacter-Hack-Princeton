@@ -8,3 +8,5 @@ node_modules/
 *.db-wal
 backend/data/*.out
 .pytest_cache/
+# Local secrets written by `elevenlabs onboard`
+/.env.local

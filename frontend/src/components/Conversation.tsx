@@ -5,6 +5,7 @@ import { chapterLabel, inSentence, recentParagraphs, type BookModel } from '../b
 import { annotate, sourcesLabel } from '../reply'
 import { BookmarkRule, SettingsMenu, TopBar } from './common'
 import { SourcePanel, type SourceView } from './SourcePanel'
+import { SpeechButton } from './SpeechButton'
 import { byPresence } from './Cast'
 
 export type Message =
@@ -273,6 +274,7 @@ export function ConversationScreen({ book, model, position, page, character, con
                     onDone={() => settle(i)}
                   />
                   <div className="msg-foot" style={{ opacity: m.fresh ? 0 : 1 }}>
+                    {character.has_audio_voice && <SpeechButton key={`${conversation.key}:${i}`} bookId={book.id} characterId={character.id} position={position} text={m.reply.reply} />}
                     {sourcesLabel(m.reply, model) && (
                       <button className="link-quiet" onClick={() => setSource({ msg: i, note: 0 })}>{sourcesLabel(m.reply, model)}</button>
                     )}

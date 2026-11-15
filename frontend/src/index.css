@@ -519,3 +519,7 @@ mark.cite { background: color-mix(in srgb, var(--color-accent) 28%, transparent)
   .moment + .moment { border-top: 1px solid var(--hairline); }
   .timeline { padding: 16px; }
 }
+
+.speech-button { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 28px; }
+.speech-button:disabled { opacity: .55; cursor: wait; }
+.speech-button:focus-visible { outline: 2px solid var(--color-accent-400); outline-offset: 3px; }

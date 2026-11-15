@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowRight, BookOpen } from 'lucide-react'
+import { ArrowLeft, ArrowRight } from 'lucide-react'
 import { api, type Book, type Character } from '../api'
 import { chapterLabel, recentParagraphs, splitTitle, spreadForPosition, type BookModel } from '../book'
 import { BookmarkRule, SettingsMenu, TopBar } from './common'
@@ -68,8 +68,8 @@ export function Cast({ book, model, position, page, onPick, onBack, onHome }: {
     <div className="app">
       <TopBar title={book.title} chapter={chapter} onBrand={onHome}>
         <SettingsMenu />
-        <button className="bar-link" onClick={onBack}>
-          <BookOpen size={14} strokeWidth={1.6} />
+        <button className="bar-link strong" onClick={onBack}>
+          <ArrowLeft size={14} strokeWidth={1.6} />
           <span className="label">Back to page {page}</span>
         </button>
       </TopBar>

@@ -216,3 +216,30 @@ def test_importing_the_module_does_not_open_the_real_database(tmp_path):
     env = {"COMPANION_DB": str(missing), "PATH": ""}
     assert subprocess.run([sys.executable, "-c", code], env=env, cwd=str(config.DATA_DIR.parent)
                           ).returncode == 0
+
+
+def test_speech_rejects_unassigned_characters(setup, monkeypatch):
+    def forbidden(*args):
+        raise AssertionError('Unassigned character must not call ElevenLabs')
+    monkeypatch.setattr(api, 'synthesize', forbidden)
+    response = setup['client'].post('/speech', json={
+        'book_id': setup['book'], 'character_id': setup['theo'], 'position': 4, 'text': 'Hello',
+    })
+    assert response.status_code == 404
+
+
+def test_speech_returns_audio_and_handles_provider_failure(setup, monkeypatch):
+    monkeypatch.setattr(api, 'assigned_voice', lambda book, character: 'test-voice')
+    monkeypatch.setattr(api, 'synthesize', lambda voice, text: b'mocked-mp3')
+    body = {'book_id': setup['book'], 'character_id': setup['theo'], 'position': 4, 'text': 'Hello'}
+    response = setup['client'].post('/speech', json=body)
+    assert response.status_code == 200
+    assert response.headers['content-type'] == 'audio/mpeg'
+    assert response.content == b'mocked-mp3'
+    assert setup['client'].post('/speech', json={**body, 'position': 5}).status_code == 409
+    def failed(*args):
+        raise RuntimeError('private provider details')
+    monkeypatch.setattr(api, 'synthesize', failed)
+    response = setup['client'].post('/speech', json=body)
+    assert response.status_code == 502
+    assert 'private provider details' not in response.text

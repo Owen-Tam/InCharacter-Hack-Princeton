@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { BookOpen, ChevronLeft } from 'lucide-react'
+import { ArrowLeft, ChevronLeft } from 'lucide-react'
 import { api, type Book, type ChatReply, type Character, type Citation } from '../api'
 import { chapterLabel, inSentence, shortChapter, spreadForPosition, type BookModel } from '../book'
 import { sourcesLabel, splitSentences } from '../reply'
@@ -122,8 +122,8 @@ export function Compare({ book, model, character, seed, page, onBackToChat, onBa
           <span className="label">Back to conversation</span>
         </button>
         <SettingsMenu />
-        <button className="bar-link" onClick={onBack}>
-          <BookOpen size={14} strokeWidth={1.6} />
+        <button className="bar-link strong" onClick={onBack}>
+          <ArrowLeft size={14} strokeWidth={1.6} />
           <span className="label">Back to page {page}</span>
         </button>
       </TopBar>

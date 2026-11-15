@@ -17,12 +17,13 @@ from typing import Callable, Iterator, Literal
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from . import config, db
 from .chat import ChatError, best_name, book_row, main_characters, character_row, chat, check_position, clamp, known_names, load_passage
 from .epub import import_epub
+from .speech import assigned_voice, synthesize
 from .llm import LLM, LLMError
 
 # -- request and response models ----------------------------------------------
@@ -34,6 +35,13 @@ class Turn(BaseModel):
     evidence_ids: list[int] = Field(default_factory=list, description=(
         "For a character turn: the evidence ids its statements cited, so later"
         " replies can bring up something new."))
+
+
+class SpeechRequest(BaseModel):
+    book_id: int
+    character_id: int
+    position: int
+    text: str = Field(min_length=1, max_length=10000)
 
 
 class ChatRequest(BaseModel):
@@ -239,6 +247,7 @@ def create_app(
                          if s["through_position"] <= position]
             out.append({"id": r["id"], "name": best_name(r, position),
                         "names": known_names(r, position), "first_seen": r["first_seen"],
+                        "has_audio_voice": assigned_voice(book, r) is not None,
                         "lines": lines, "last_heard": last_heard, "facts": facts, "has_voice_profile": bool(snapshots)})
         return out
 
@@ -248,6 +257,24 @@ def create_app(
         """One paragraph, cut off at the reader's bookmark ("show passage")."""
         check_position(book_row(conn, book_id), position)
         return clamp(load_passage(conn, book_id, passage_id), position)
+
+    @app.post("/speech")
+    def speech(request: SpeechRequest, conn: sqlite3.Connection = Depends(get_conn)):
+        book = book_row(conn, request.book_id)
+        check_position(book, request.position)
+        character = character_row(conn, request.book_id, request.character_id, request.position)
+        voice = assigned_voice(book, character)
+        if not voice:
+            raise HTTPException(404, "No audio voice is assigned to this character in this book.")
+        if not request.text.strip():
+            raise HTTPException(400, "Speech text is empty.")
+        try:
+            audio = synthesize(voice, request.text)
+            if not audio:
+                raise ValueError("Empty audio")
+        except Exception:
+            raise HTTPException(502, "Audio could not be generated. Please try again.") from None
+        return Response(audio, media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
 
     @app.post("/chat")
     def post_chat(request: ChatRequest, conn: sqlite3.Connection = Depends(get_conn)) -> dict:

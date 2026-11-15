@@ -32,6 +32,7 @@ export interface Character {
   lines: number
   last_heard: number | null // sentence of their latest line before the bookmark
   facts: number
+  has_audio_voice?: boolean
   has_voice_profile: boolean
 }
 
