@@ -7,7 +7,7 @@ from . import config
 
 # Match canonical identities, not database IDs, so reimports retain the assignment.
 VOICE_ASSIGNMENTS = {
-    ('the diary of a young girl: the definitive edition', 'anne frank'): 'PV4xbyCf6QubEtfcEidV',
+    ('the diary of a young girl: the definitive edition', 'anne frank'): '2v1gkpdGjlxaHVg9L01c',
 }
 
 
@@ -24,7 +24,7 @@ def synthesize(voice_id: str, text: str) -> bytes:
     load_dotenv(config.DATA_DIR.parent.parent / ".env")
     if not os.environ.get('ELEVENLABS_API_KEY'):
         raise RuntimeError('Speech is not configured on the server.')
-    client = ElevenLabs()
+    client = ElevenLabs(api_key=os.environ['ELEVENLABS_API_KEY'])
     return b''.join(client.text_to_speech.convert(
-        voice_id=voice_id, text=text, model_id='eleven_v4', output_format='mp3_44100_128',
+        voice_id=voice_id, text=text, model_id='eleven_multilingual_v2', output_format='mp3_44100_128',
     ))
