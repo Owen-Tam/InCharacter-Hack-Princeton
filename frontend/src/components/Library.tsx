@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import { Plus } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ChevronDown, Plus } from 'lucide-react'
 import { api, type Book } from '../api'
 import { splitTitle } from '../book'
 import { allReadingStates } from '../store'
@@ -16,6 +16,74 @@ function statusLine(book: Book): string {
   return learned ? `Learning the cast · ${learned}%` : 'Learning the cast'
 }
 
+type SortBy = 'opened' | 'added'
+const SORT_KEY = 'incharacter.librarySort.v1'
+
+function savedSort(): SortBy {
+  try {
+    return localStorage.getItem(SORT_KEY) === 'added' ? 'added' : 'opened'
+  } catch {
+    return 'opened'
+  }
+}
+
+const SORT_LABELS: Record<SortBy, string> = { opened: 'Recently opened', added: 'Date added' }
+const SORTS = Object.keys(SORT_LABELS) as SortBy[]
+
+/** "Sort by Recently opened ⌄": a small menu in the app's own style. Closes on a
+ * choice, Escape or a click elsewhere; arrow keys move between options. */
+function SortMenu({ value, onChange }: { value: SortBy; onChange: (next: SortBy) => void }) {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const items = useRef<(HTMLButtonElement | null)[]>([])
+
+  useEffect(() => {
+    if (!open) return
+    items.current[SORTS.indexOf(value)]?.focus()
+    const onDown = (e: PointerEvent) => { if (!root.current?.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('pointerdown', onDown)
+    return () => document.removeEventListener('pointerdown', onDown)
+  }, [open, value])
+
+  function choose(next: SortBy) {
+    onChange(next)
+    setOpen(false)
+    trigger.current?.focus()
+  }
+
+  function onKey(e: React.KeyboardEvent) {
+    if (e.key === 'Escape') { setOpen(false); trigger.current?.focus(); return }
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+    e.preventDefault()
+    if (!open) { setOpen(true); return }
+    const at = items.current.indexOf(document.activeElement as HTMLButtonElement)
+    const next = (at + (e.key === 'ArrowDown' ? 1 : -1) + SORTS.length) % SORTS.length
+    items.current[next]?.focus()
+  }
+
+  return (
+    <div className="sorter" ref={root} onKeyDown={onKey}>
+      <span className="sorter-label" id="sort-label">Sort by</span>
+      <button ref={trigger} className="sorter-button" aria-haspopup="listbox" aria-expanded={open}
+        aria-labelledby="sort-label sort-value" onClick={() => setOpen((o) => !o)}>
+        <span id="sort-value">{SORT_LABELS[value]}</span>
+        <ChevronDown size={13} strokeWidth={1.6} className={open ? 'flip' : undefined} aria-hidden />
+      </button>
+      {open && (
+        <div className="sorter-menu" role="listbox" aria-labelledby="sort-label">
+          {SORTS.map((key, i) => (
+            <button key={key} ref={(el) => { items.current[i] = el }} role="option" aria-selected={key === value}
+              className={key === value ? 'on' : undefined} onClick={() => choose(key)}>
+              {SORT_LABELS[key]}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function Library({ books, error, onOpen, onUploaded }: {
   books: Book[] | null
   error: string | null
@@ -26,6 +94,20 @@ export function Library({ books, error, onOpen, onUploaded }: {
   const [uploading, setUploading] = useState(false)
   const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null)
   const reading = allReadingStates()
+  const [sortBy, setSortBy] = useState<SortBy>(savedSort)
+  function chooseSort(next: SortBy) {
+    setSortBy(next)
+    try { localStorage.setItem(SORT_KEY, next) } catch { /* storage unavailable */ }
+  }
+  // Ids count up as books are imported, so they give the order added (newest first).
+  // Books never opened here follow the opened ones, newest added first.
+  const sorted = books && [...books].sort((a, b) => {
+    if (sortBy === 'opened') {
+      const diff = (reading[b.id]?.openedAt ?? 0) - (reading[a.id]?.openedAt ?? 0)
+      if (diff) return diff
+    }
+    return b.id - a.id
+  })
 
   const recent = books
     ?.filter((b) => reading[b.id])
@@ -91,9 +173,12 @@ export function Library({ books, error, onOpen, onUploaded }: {
 
         {books && (
           <section className="all-books" style={recent ? undefined : { borderTop: 0, paddingTop: 0 }}>
-            <span className="shelf-label">All books</span>
+            <div className="shelf-head">
+              <span className="shelf-label">All books</span>
+              <SortMenu value={sortBy} onChange={chooseSort} />
+            </div>
             <div className="covers">
-              {books.map((b) => (
+              {sorted!.map((b) => (
                 <button key={b.id} className="cover-item" onClick={() => onOpen(b.id)}>
                   <Cover title={b.title} />
                   <span className="name">{splitTitle(b.title).title}</span>

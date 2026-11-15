@@ -61,7 +61,8 @@ export function Cast({ book, model, position, page, onPick, onBack, onHome }: {
     return () => { live = false }
   }, [book.id, position])
 
-  const lastPara = recentParagraphs(model, position, 1)[0]
+  // As much of the page as the conversation screen shows beside the chat.
+  const paragraphs = recentParagraphs(model, position, 6)
 
   return (
     <div className="app">
@@ -75,7 +76,7 @@ export function Cast({ book, model, position, page, onPick, onBack, onHome }: {
         <aside className="side">
           <div className="left-off">
             <span className="small muted">Where you left off{chapter ? ` · ${chapter}` : ''}</span>
-            <div className="left-off-text">{lastPara && <p>{lastPara.text}</p>}</div>
+            <div className="left-off-text">{paragraphs.map((p) => <p key={p.passage.id}>{p.text}</p>)}</div>
             <BookmarkRule />
           </div>
           <div className="side-note">
@@ -98,7 +99,7 @@ export function Cast({ book, model, position, page, onPick, onBack, onHome }: {
             {cast?.map((c) => (
               <button key={c.id} className="cast-row" onClick={() => onPick(c)}>
                 <span className="who">{c.name}</span>
-                <span className="desc">{describe(c, model)}</span>
+                <span className="desc" title={describe(c, model)}>{describe(c, model)}</span>
                 <ArrowRight className="go" size={16} strokeWidth={1.6} />
               </button>
             ))}
