@@ -124,7 +124,7 @@ model fails (retry). Replies take about 5 to 30 seconds.
   redistribute them.
 
 ## Team Members
-- Emily Me
+- Emily Mei
 - Emily Fung
 - Owen Tam
 - Kelun Li
