@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { api, type Book, type ChatReply, type Character, type Passage } from './api'
 import { buildBook, pageMetrics, type PageMetrics, spreadForPassage, spreadForPosition, type BookModel } from './book'
 import { go, useRoute } from './router'
-import { readingState, saveReadingState } from './store'
+import { getSettings, readingState, saveReadingState, subscribeSettings } from './store'
 import { Library } from './components/Library'
 import { Reader } from './components/Reader'
 import { Cast } from './components/Cast'
@@ -46,20 +46,24 @@ const bodyFont: Promise<unknown> = Promise.race([
 
 /** Page geometry for the current window: null until the body font is ready. */
 function useMetrics() {
-  const measure = () => pageMetrics(window.innerWidth, window.innerHeight)
+  // The book's text size is a reader setting: changing it lays the book out again.
+  // The bookmark is a sentence, so the reader stays at the same place in the story.
+  const fontSize = useSyncExternalStore(subscribeSettings, () => getSettings().bookFont)
+  const measure = () => pageMetrics(window.innerWidth, window.innerHeight, fontSize)
   const [metrics, setMetrics] = useState<PageMetrics | null>(null)
   useEffect(() => {
     let t = 0
     let live = true
     const update = () => setMetrics((m) => {
       const next = measure()
-      return m && next.charsPerLine === m.charsPerLine && next.lines === m.lines ? m : next
+      return m && next.charsPerLine === m.charsPerLine && next.lines === m.lines && next.fontSize === m.fontSize ? m : next
     })
     const onResize = () => { window.clearTimeout(t); t = window.setTimeout(update, 150) }
     bodyFont.then(() => live && update())
     window.addEventListener('resize', onResize)
     return () => { live = false; window.removeEventListener('resize', onResize); window.clearTimeout(t) }
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fontSize])
   return metrics
 }
 

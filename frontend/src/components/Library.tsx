@@ -4,7 +4,7 @@ import { api, type Book } from '../api'
 import { authorOf, splitTitle } from '../book'
 import { SAMPLE_BOOKS } from '../samples'
 import { allReadingStates } from '../store'
-import { Cover } from './common'
+import { Cover, SettingsMenu } from './common'
 
 function percent(book: Book, position: number) {
   return book.sentences ? Math.round((position / book.sentences) * 100) : 0
@@ -140,7 +140,7 @@ export function Library({ books, error, onOpen, onUploaded }: {
     <div className="app">
       <header className="bar plain">
         <span className="brand">InCharacter</span>
-        <nav className="bar-actions">{addButton}</nav>
+        <nav className="bar-actions"><SettingsMenu />{addButton}</nav>
       </header>
       <input ref={fileInput} type="file" accept=".epub,application/epub+zip" hidden
         onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />

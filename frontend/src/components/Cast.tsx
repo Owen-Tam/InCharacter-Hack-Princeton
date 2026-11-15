@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { ArrowRight, BookOpen } from 'lucide-react'
 import { api, type Book, type Character } from '../api'
 import { chapterLabel, recentParagraphs, splitTitle, spreadForPosition, type BookModel } from '../book'
-import { BookmarkRule, TopBar } from './common'
+import { BookmarkRule, SettingsMenu, TopBar } from './common'
 
 const TITLES = /^(mr|mrs|miss|ms|dr|doctor|old)\.?$/i
 
@@ -67,6 +67,7 @@ export function Cast({ book, model, position, page, onPick, onBack, onHome }: {
   return (
     <div className="app">
       <TopBar title={book.title} chapter={chapter} onBrand={onHome}>
+        <SettingsMenu />
         <button className="bar-link" onClick={onBack}>
           <BookOpen size={14} strokeWidth={1.6} />
           <span className="label">Back to page {page}</span>

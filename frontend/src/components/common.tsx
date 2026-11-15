@@ -1,6 +1,71 @@
-import type { ReactNode } from 'react'
-import { Bookmark } from 'lucide-react'
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { Bookmark, Minus, Plus, Settings as SettingsIcon } from 'lucide-react'
 import { splitTitle } from '../book'
+import { BOOK_FONT_SIZES, getSettings, subscribeSettings, updateSettings, type Theme } from '../store'
+
+/** The settings button and its panel: theme, contrast and the book's text size.
+ * Closes on Escape or a click elsewhere. */
+export function SettingsMenu() {
+  const settings = useSyncExternalStore(subscribeSettings, getSettings)
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: PointerEvent) => { if (!root.current?.contains(e.target as Node)) setOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setOpen(false); trigger.current?.focus() } }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [open])
+
+  const at = BOOK_FONT_SIZES.indexOf(settings.bookFont)
+  const step = (d: number) => {
+    const next = BOOK_FONT_SIZES[at + d]
+    if (next) updateSettings({ bookFont: next })
+  }
+
+  return (
+    <div className="settings" ref={root}>
+      <button ref={trigger} className="bar-link" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <SettingsIcon size={14} strokeWidth={1.6} />
+        <span className="label">Settings</span>
+      </button>
+      {open && (
+        <div className="settings-panel" role="dialog" aria-label="Settings">
+          <div className="setting">
+            <span className="setting-name" id="set-theme">Theme</span>
+            <div className="segmented" role="radiogroup" aria-labelledby="set-theme">
+              {(['dark', 'light'] as Theme[]).map((t) => (
+                <button key={t} role="radio" aria-checked={settings.theme === t} className={settings.theme === t ? 'on' : undefined}
+                  onClick={() => updateSettings({ theme: t })}>
+                  {t === 'dark' ? 'Dark' : 'Light'}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="setting">
+            <span className="setting-name" id="set-contrast">High contrast</span>
+            <button className={`switch${settings.contrast === 'high' ? ' on' : ''}`} role="switch" aria-labelledby="set-contrast"
+              aria-checked={settings.contrast === 'high'}
+              onClick={() => updateSettings({ contrast: settings.contrast === 'high' ? 'normal' : 'high' })}>
+              <span className="knob" />
+            </button>
+          </div>
+          <div className="setting">
+            <span className="setting-name" id="set-font">Book font size</span>
+            <div className="stepper" role="group" aria-labelledby="set-font">
+              <button onClick={() => step(-1)} disabled={at <= 0} aria-label="Smaller font"><Minus size={13} strokeWidth={1.6} /></button>
+              <span className="tnum" aria-live="polite">{settings.bookFont}px</span>
+              <button onClick={() => step(1)} disabled={at >= BOOK_FONT_SIZES.length - 1} aria-label="Larger font"><Plus size={13} strokeWidth={1.6} /></button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function TopBar({ title, chapter, children, onBrand }: {
   title?: string

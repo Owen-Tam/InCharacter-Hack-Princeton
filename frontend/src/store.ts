@@ -34,3 +34,63 @@ export function saveReadingState(bookId: number, state: Omit<ReadingState, 'open
     /* storage unavailable */
   }
 }
+
+// -- display settings -----------------------------------------------------------
+
+export type Theme = 'dark' | 'light'
+export type Contrast = 'normal' | 'high'
+
+export interface Settings {
+  theme: Theme
+  contrast: Contrast
+  bookFont: number // px, the book pages' body text
+}
+
+export const BOOK_FONT_SIZES = [14, 16, 18, 20, 22]
+const DEFAULT_SETTINGS: Settings = { theme: 'dark', contrast: 'normal', bookFont: 16 }
+const SETTINGS_KEY = 'incharacter.settings.v1'
+
+function loadSettings(): Settings {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') ?? {}
+    return {
+      theme: saved.theme === 'light' ? 'light' : 'dark',
+      contrast: saved.contrast === 'high' ? 'high' : 'normal',
+      bookFont: BOOK_FONT_SIZES.includes(saved.bookFont) ? saved.bookFont : DEFAULT_SETTINGS.bookFont,
+    }
+  } catch {
+    return DEFAULT_SETTINGS
+  }
+}
+
+let settings = loadSettings()
+const listeners = new Set<() => void>()
+
+/** Put the settings on the page: theme and contrast as attributes on <html> (the
+ * CSS tokens switch on them), the book's text size as a custom property. */
+export function applySettings(s: Settings = settings) {
+  const root = document.documentElement
+  root.dataset.theme = s.theme
+  root.dataset.contrast = s.contrast
+  root.style.setProperty('--book-font', `${s.bookFont}px`)
+}
+
+export function getSettings(): Settings {
+  return settings
+}
+
+export function updateSettings(patch: Partial<Settings>) {
+  settings = { ...settings, ...patch }
+  applySettings(settings)
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
+  } catch {
+    /* storage unavailable: the change still holds for this visit */
+  }
+  listeners.forEach((l) => l())
+}
+
+export function subscribeSettings(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}

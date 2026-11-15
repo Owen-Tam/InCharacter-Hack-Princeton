@@ -58,21 +58,24 @@ export interface PageMetrics {
   textWidth: number // px available for a line of text
   indent: number // px of a paragraph's first-line indent
   measure: (text: string) => number // px width of a run of text in the body font
+  fontSize: number // px, the body text (the reader's setting)
+  headingLines: number // lines a chapter heading takes, with its padding
 }
 
-/** Mirror of the .page / .page-body CSS: 16px Lora at 1.7, 4px paragraph gaps, 1.4em indents. */
-export function pageMetrics(viewportWidth: number, viewportHeight: number): PageMetrics {
+/** Mirror of the .page / .page-body CSS: Lora at the reader's size (16px by default),
+ * line height 1.7, 4px paragraph gaps, 1.4em indents, 24px chapter headings. */
+export function pageMetrics(viewportWidth: number, viewportHeight: number, fontSize = 16): PageMetrics {
   const narrow = viewportWidth <= 760
   const pageWidth = narrow ? viewportWidth - 112 : 470
   const pageHeight = Math.max(420, Math.min(760, viewportHeight - 200))
   const textWidth = pageWidth - (narrow ? 44 : 88)
   const textHeight = pageHeight - (narrow ? 48 : 88) - 28 // padding, then the page number
-  const lineHeight = 16 * 1.7
-  let measure = estimate
+  const lineHeight = fontSize * 1.7
+  let measure = (text: string) => estimate(text) * (fontSize / 16)
   try {
     const ctx = document.createElement('canvas').getContext('2d')
     if (ctx) {
-      ctx.font = '16px Lora'
+      ctx.font = `${fontSize}px Lora`
       const cache = new Map<string, number>()
       measure = (text) => {
         let w = cache.get(text)
@@ -90,13 +93,17 @@ export function pageMetrics(viewportWidth: number, viewportHeight: number): Page
     gapLines: 4 / lineHeight,
     // A hair under the real width, so rounding never makes the browser wrap a line we didn't.
     textWidth: textWidth - 1,
-    indent: 16 * 1.4,
+    indent: fontSize * 1.4,
     measure,
+    fontSize,
+    headingLines: Math.ceil((24 * 1.7 + 12) / lineHeight), // .chapter-heading: 24px at 1.7, 12px padding
   }
 }
 
 const estimate = (text: string) => codepoints(text).length * 7.9 // Lora 16px average
-const DEFAULT_METRICS: PageMetrics = { charsPerLine: 46, lines: 17, gapLines: 0.15, textWidth: 381, indent: 22.4, measure: estimate }
+const DEFAULT_METRICS: PageMetrics = {
+  charsPerLine: 46, lines: 17, gapLines: 0.15, textWidth: 381, indent: 22.4, measure: estimate, fontSize: 16, headingLines: 2,
+}
 
 /** A piece of text between two places a line may break: after a space or a dash. */
 interface Segment { lo: number; hi: number; width: number; spaceAfter: boolean }
@@ -157,7 +164,7 @@ export function paginate(passages: Passage[], metrics: PageMetrics = DEFAULT_MET
       // unless the page is nearly empty.
       if (used > metrics.lines / 3) flush()
       current.push({ passage, lo: 0, hi: chars.length, text: passage.text.trim(), continued: false, lastSentence: lastSentence(passage) })
-      used += (current.length > 1 ? metrics.gapLines : 0) + 2
+      used += (current.length > 1 ? metrics.gapLines : 0) + metrics.headingLines
       continue
     }
     const segs = segments(chars, metrics.measure)

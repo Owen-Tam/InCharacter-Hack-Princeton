@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight, MessageCircle } from 'lucide-react'
 import type { Book } from '../api'
 import { chapterLabel, pagesLeftInChapter, spreadForPosition, type BookModel, type Page } from '../book'
-import { TopBar } from './common'
+import { SettingsMenu, TopBar } from './common'
 
 function PageView({ page, side, number, book }: { page: Page | null; side: 'left' | 'right'; number: number; book: BookModel }) {
   const headings = new Set(book.chapters.map((c) => c.paragraphPos))
@@ -73,6 +73,7 @@ export function Reader({ book, model, spreadIndex, onSpread, onTalk, onHome }: {
   return (
     <div className="app">
       <TopBar title={book.title} chapter={chapterLabel(model, spread.position)} onBrand={onHome}>
+        <SettingsMenu />
         <button className="btn" onClick={onTalk}>
           <MessageCircle size={14} strokeWidth={1.6} />
           <span className="label">Talk to a character</span>

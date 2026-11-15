@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowLeft, Bookmark, BookOpen, Users } from 'lucide-reac
 import { api, type Book, type ChatReply, type Character, type Turn } from '../api'
 import { chapterLabel, inSentence, recentParagraphs, type BookModel } from '../book'
 import { annotate, sourcesLabel } from '../reply'
-import { BookmarkRule, TopBar } from './common'
+import { BookmarkRule, SettingsMenu, TopBar } from './common'
 import { SourcePanel, type SourceView } from './SourcePanel'
 import { byPresence } from './Cast'
 
@@ -196,6 +196,7 @@ export function ConversationScreen({ book, model, position, page, character, con
           <Users size={14} strokeWidth={1.6} />
           <span className="label">Change character</span>
         </button>
+        <SettingsMenu />
         <button className="bar-link strong" onClick={onBack}>
           <ArrowLeft size={14} strokeWidth={1.6} />
           <span className="label">Back to page {page}</span>
