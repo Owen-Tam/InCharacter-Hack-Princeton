@@ -122,3 +122,9 @@ model fails (retry). Replies take about 5 to 30 seconds.
 - `test_epub/` holds sample books for local testing. *The Great Gatsby* is in
   the US public domain, but the others are still under copyright, so don't
   redistribute them.
+
+## Team Members
+- Emily Mei
+- Emily Fung
+- Owen Tam
+- Kelun Li
