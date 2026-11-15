@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, Plus } from 'lucide-react'
 import { api, type Book } from '../api'
 import { authorOf, splitTitle } from '../book'
+import { SAMPLE_BOOKS } from '../samples'
 import { allReadingStates } from '../store'
 import { Cover } from './common'
 
@@ -185,6 +186,14 @@ export function Library({ books, error, onOpen, onUploaded }: {
                   <span className="meta tnum">
                     {reading[b.id] ? `${percent(b, reading[b.id].position)}% read` : b.status === 'ready' ? 'New' : statusLine(b)}
                   </span>
+                </button>
+              ))}
+              {SAMPLE_BOOKS.map((b) => (
+                <button key={b.key} className="cover-item sample"
+                  onClick={() => setNotice({ text: `“${b.title}” is a sample on the shelf. Add its EPUB to read it and meet the characters.` })}>
+                  <Cover title={b.title} author={b.author} />
+                  <span className="name">{b.title}</span>
+                  <span className="meta">Sample</span>
                 </button>
               ))}
               <button className="add-epub" onClick={() => fileInput.current?.click()} disabled={uploading}>

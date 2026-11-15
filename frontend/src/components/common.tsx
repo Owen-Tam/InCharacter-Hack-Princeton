@@ -37,11 +37,48 @@ export function coverColor(title: string): string {
   return `oklch(0.40 0.07 ${HUES[h % HUES.length]})`
 }
 
+// Cover titles never break inside a word: the size comes down until the longest word
+// fits the cover's width and every line fits its height.
+let measureCtx: CanvasRenderingContext2D | null | undefined
+function wordWidth(text: string, size: number): number {
+  if (measureCtx === undefined) {
+    try { measureCtx = document.createElement('canvas').getContext('2d') } catch { measureCtx = null }
+  }
+  if (!measureCtx) return text.length * size * 0.5
+  measureCtx.font = `${size}px "Cormorant Garamond", Georgia, serif` // .cover .t
+  return measureCtx.measureText(text).width
+}
+
+const fitted = new Map<string, number>()
+function fitTitle(title: string, base: number, width: number, height: number): number {
+  const key = `${title}|${base}`
+  const hit = fitted.get(key)
+  if (hit) return hit
+  const words = title.split(/\s+/).filter(Boolean)
+  let size = base
+  for (; size > 10; size -= 0.5) {
+    const space = wordWidth(' ', size)
+    let lines = 1
+    let line = 0
+    let fits = true
+    for (const word of words) {
+      const w = wordWidth(word, size)
+      if (w > width) { fits = false; break }
+      if (line && line + space + w > width) { lines++; line = w } else line = line ? line + space + w : w
+    }
+    if (fits && lines * size * 1.05 <= height) break
+  }
+  fitted.set(key, size)
+  return size
+}
+
 export function Cover({ title, author, large }: { title: string; author?: string | null; large?: boolean }) {
   const t = splitTitle(title)
+  // Room inside the cover's padding, less the author line at the foot (see .cover CSS).
+  const fontSize = large ? fitTitle(t.title, 25, 116, 150) : fitTitle(t.title, 19, 84, 100)
   return (
     <div className={`cover${large ? ' large' : ''}`} style={{ background: coverColor(title) }} aria-hidden>
-      <span className="t">{t.title}</span>
+      <span className="t" style={{ fontSize }}>{t.title}</span>
       <div className="foot">
         <div className="rule" />
         <span className="a">{author || t.author || ' '}</span>
