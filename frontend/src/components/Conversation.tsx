@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
-import { AlertTriangle, ArrowLeft, Bookmark, BookOpen, Users } from 'lucide-react'
+import { ArrowLeft, Bookmark, BookOpen, Users } from 'lucide-react'
 import { api, type Book, type ChatReply, type Character, type Turn } from '../api'
 import { chapterLabel, inSentence, recentParagraphs, type BookModel } from '../book'
 import { annotate, sourcesLabel } from '../reply'
@@ -282,12 +282,6 @@ export function ConversationScreen({ book, model, position, page, character, con
                       <Bookmark size={12} strokeWidth={1.6} />
                       Ask at another point in the book
                     </button>
-                    {m.reply.unsupported_statements.length > 0 && (
-                      <span className="unsupported" title={m.reply.unsupported_statements.join('\n')}>
-                        <AlertTriangle size={12} strokeWidth={1.6} />
-                        Some of this isn't backed by the book
-                      </span>
-                    )}
                   </div>
                 </div>
               ),

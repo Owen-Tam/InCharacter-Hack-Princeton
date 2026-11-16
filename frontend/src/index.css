@@ -408,7 +408,6 @@ a { color: var(--color-accent-300); }
 .link-quiet:hover { color: var(--color-accent-300); }
 .link-accent { display: flex; align-items: center; gap: 5px; color: var(--color-accent-300); background: none; border: 0; padding: 0; cursor: pointer; font-size: inherit; }
 .link-accent:hover { color: var(--color-accent-200); }
-.unsupported { color: var(--color-accent-300); display: flex; align-items: center; gap: 5px; }
 .thinking { font-family: var(--font-heading); font-style: italic; font-size: 20px; color: var(--color-neutral-500); animation: breathe 1.8s ease-in-out infinite; }
 @keyframes breathe { 50% { opacity: 0.45; } }
 .msg-error { align-self: flex-start; font-size: 13px; color: var(--color-error); display: flex; gap: 12px; align-items: center; }
