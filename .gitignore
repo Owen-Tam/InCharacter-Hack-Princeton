@@ -11,3 +11,6 @@ backend/data/*.out
 # Local secrets written by `elevenlabs onboard`
 /.env.local
 .vscode/
+frontend/.vite/
+# Extraction log: only used to resume/repair local imports
+backend/data/*.extract_log.jsonl
