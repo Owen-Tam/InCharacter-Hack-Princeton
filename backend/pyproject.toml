@@ -13,3 +13,6 @@ testpaths = ["tests"]
 pythonpath = ["."]
 markers = ["live: calls the real Adaption Labs API (run with -m live)"]
 addopts = "-m 'not live'"
+
+[tool.setuptools]
+packages = ["companion"]
